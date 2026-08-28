@@ -16,27 +16,50 @@ Phase I Generic Core Foundationを、provider非依存・side-effect freeなDoma
 
 ## 2. Package boundary
 
-初期実装ではCoreを次の論理領域へ分ける。
+初期実装ではPythonのsrc-layoutを採用する。
 
 ```text
-src/loop_engineering/core/
-├─ identities.py
-├─ models.py
-├─ conflicts.py
-├─ evidence.py
-├─ reconciliation.py
-├─ scheduler.py
-├─ resume.py
-├─ task_packet.py
-├─ effects.py
-├─ health.py
-├─ self_improvement.py
-└─ __init__.py
+pyproject.toml
+src/
+└─ loop_engineering/
+   ├─ __init__.py
+   └─ core/
+      ├─ identities.py
+      ├─ models.py
+      ├─ conflicts.py
+      ├─ evidence.py
+      ├─ reconciliation.py
+      ├─ scheduler.py
+      ├─ resume.py
+      ├─ task_packet.py
+      ├─ effects.py
+      ├─ health.py
+      ├─ self_improvement.py
+      └─ __init__.py
+tests/
 ```
 
 実装中に循環依存を避けるための小規模な再配置は許容するが、責務境界を変更する場合は本書を同じPRで更新する。
 
 ## 3. Work decomposition
+
+### 0. Python Package / Toolchain Bootstrap
+
+Owns:
+- `pyproject.toml`
+- src-layout package skeleton
+- pytest bootstrap
+- Ruff configuration
+- strict Mypy configuration
+- compileall / diff-check runbook-level commands
+- minimal repository ignore rules needed by the Python toolchain
+
+Rules:
+- Core domain modelを先行実装しない
+- GitHub Actions等のCI providerを導入しない
+- provider SDK dependencyを追加しない
+- secret/config credentialを追加しない
+- #10以降のWorkが同一toolchain contractを再利用できる状態を作る
 
 ### A. Core State Contracts
 
@@ -119,10 +142,11 @@ Integration IssueはA-Dの独立責務を再実装しない。
 ## 4. Dependency order
 
 ```text
-A Core State Contracts
-   ├─> B Decision Core
-   ├─> C Effect Safety Core
-   └─> D Health / Self-Improvement
+0 Python Package / Toolchain Bootstrap
+   └─> A Core State Contracts
+          ├─> B Decision Core
+          ├─> C Effect Safety Core
+          └─> D Health / Self-Improvement
 
 B + C + D
    └─> E Core Integration Verification
@@ -130,9 +154,29 @@ B + C + D
 
 B/C/DはA完了後、相互にファイル競合しないよう境界を維持できる場合は並行可能。
 
-## 5. Verification policy
+## 5. Toolchain baseline
 
-各Work最低限:
+Phase I初期baseline:
+- Python: `>=3.10`
+- packaging/build: standard `pyproject.toml` + setuptools backend
+- tests: pytest
+- lint/static quality: Ruff
+- typing: Mypy strict
+- layout: `src/`
+
+Python 3.10互換を壊すlanguage featureを導入する場合は、別のdesign decisionとして本書/関連Issueを更新する。
+
+## 6. Verification policy
+
+Bootstrap Work最低限:
+- package import smoke
+- pytest smoke
+- Ruff
+- strict Mypy
+- compileall
+- `git diff --check`
+
+各Core Work最低限:
 - targeted unit tests
 - Ruff
 - strict Mypy
@@ -148,14 +192,15 @@ Phase I Integrationでは追加で:
 - crash/effect ambiguity decision scenario
 - health storm/self-recursion guard scenario
 
-## 6. Implementation lineage
+## 7. Implementation lineage
 
 - 1 Work Issue = 1 active implementation lineage
 - Parent Issue自身ではimplementation branch/PRを作らない
+- #15 Bootstrap WorkをAより先にmainへ統合する
 - Integration IssueはA-D merge後の`main`から開始する
 - stacked PRが必要な場合は同一lineageであることをIssue checkpointへ明記する
 
-## 7. Non-goals
+## 8. Non-goals
 
 - GitHub adapter
 - Project adapter
@@ -168,10 +213,10 @@ Phase I Integrationでは追加で:
 - Yura固有mapping
 - PostgreSQL
 
-## 8. Phase completion
+## 9. Phase completion
 
 Phase I complete条件:
-- A-D Workがmainへcanonicalized
+- Bootstrap + A-D Workがmainへcanonicalized
 - E IntegrationがPASS
 - Coreからprovider SDK/importが存在しない
 - canonical architectureとのblocking contradiction 0
