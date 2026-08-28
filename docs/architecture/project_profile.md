@@ -30,6 +30,36 @@ ProjectProfileSnapshot
 
 feature/PR branch上のProfile変更を、そのPR自身のReview/Write policyへ即時適用しない。
 
+### 2.1 Bootstrap trust anchor
+
+Profile自身に「どのrepository/ref/pathのProfileを信頼するか」を決めさせてはならない。そうするとuntrusted Profileが自分自身のtrust anchorを変更できる循環になる。
+
+最初のtrust anchorはHost側のProject Registrationが所有する。
+
+```text
+ProjectRegistration
+- project_identity
+- repository_identity
+- profile_source_kind
+- trusted_profile_ref
+- trusted_profile_path
+- registration_revision
+```
+
+解決順序:
+
+```text
+Host ProjectRegistration
+→ trusted repository/ref/path
+→ fetch Project Profile
+→ schema/policy validation
+→ ProjectProfileSnapshot
+```
+
+Project Profile内で`canonical_branch`等を指定することはできるが、それはProductのsource/design canonicalを表す値であり、**Profile自身を取得するtrust anchorとは別物**とする。
+
+Profile変更PRが`trusted_profile_ref`や`trusted_profile_path`を変更しようとしても、その変更を自己適用しない。trust anchor変更はHost registrationの明示更新として扱い、必要に応じてHuman/Policy Gateを要求する。
+
 ## 3. Configuration precedence
 
 低い設定が高い安全policyを緩和してはならない。
@@ -123,6 +153,7 @@ Profileへ置かないもの:
 - arbitrary executable shell injected into trusted host without policy validation
 - Host policyを弱めるoverride
 - live current HEAD / current PRを永続的truthとして固定する値
+- Profile自身のbootstrap trust anchorを自己承認する値
 
 secretはhost credential providerからruntime injectionする。
 
@@ -151,7 +182,8 @@ shell interpolationを必要とする場合は明示的なhigh-risk capability�
 
 ```text
 ProjectIdentity
-→ trusted repository/ref resolve
+→ Host ProjectRegistration resolve
+→ trusted repository/ref/path resolve
 → fetch profile blob
 → schema validate
 → mandatory policy merge
@@ -195,6 +227,7 @@ Yura Issue body Canonical section
 ## 11. Hard invariants
 
 - PR branch自身にControl Plane policyを自己変更させない
+- Profile自身にbootstrap trust anchorを自己変更させない
 - secretsをProfileへ保存しない
 - Host safety policyをProductから緩和不可
 - schema versionを明示する
