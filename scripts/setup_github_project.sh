@@ -58,20 +58,22 @@ ensure_date "Start date"
 ensure_date "Target date"
 
 FIELDS_JSON="$(gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --limit 100 --format json)"
-python - "$PROJECT_NUMBER" <<'PY' <<<"$FIELDS_JSON"
-import json,sys
-number=sys.argv[1]
-data=json.load(sys.stdin)
-fields={f.get("name"): f for f in data.get("fields", [])}
-required=["Status","Priority","Area","Issue level","作業種別","Start date","Target date"]
-missing=[name for name in required if name not in fields]
+FIELDS_JSON="$FIELDS_JSON" PROJECT_NUMBER="$PROJECT_NUMBER" python - <<'PY'
+import json
+import os
+
+data = json.loads(os.environ["FIELDS_JSON"])
+number = os.environ["PROJECT_NUMBER"]
+fields = {field.get("name"): field for field in data.get("fields", [])}
+required = ["Status", "Priority", "Area", "Issue level", "作業種別", "Start date", "Target date"]
+missing = [name for name in required if name not in fields]
 if missing:
     raise SystemExit("Missing project fields: " + ", ".join(missing))
 print(f"Project #{number} fields: PASS")
-status=fields["Status"]
-options=[o.get("name") for o in status.get("options", [])]
-required_status=["Backlog","Ready","In progress","Review","Verification","Blocked","Done"]
-missing_status=[x for x in required_status if x not in options]
+status = fields["Status"]
+options = [option.get("name") for option in status.get("options", [])]
+required_status = ["Backlog", "Ready", "In progress", "Review", "Verification", "Blocked", "Done"]
+missing_status = [name for name in required_status if name not in options]
 if missing_status:
     print("Status options need one-time GitHub UI alignment: " + ", ".join(missing_status))
 else:
