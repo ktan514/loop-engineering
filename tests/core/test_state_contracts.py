@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from loop_engineering.core import (
+    canonical_digest,
+    canonical_json,
     CanonicalGeneration,
     Conflict,
     ConflictKind,
@@ -20,8 +22,6 @@ from loop_engineering.core import (
     RunGoalKind,
     SourceIdentity,
     WorkItem,
-    canonical_digest,
-    canonical_json,
 )
 
 
