@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from hashlib import sha256
-import json
 from typing import Any, cast
 
 
