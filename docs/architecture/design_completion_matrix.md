@@ -1,7 +1,7 @@
 # Architecture Completion Matrix
 
 Owner: Issue #1
-Status: Initial architecture complete pending Human confirmation
+Status: Initial architecture complete / Human confirmed / canonicalized
 
 ## 1. Purpose
 
@@ -11,21 +11,21 @@ Status: Initial architecture complete pending Human confirmation
 
 | Area | Canonical document | Owner Issue | Status |
 |---|---|---:|---|
-| Platform overview | `docs/architecture/overview.md` | #1 | Draft complete |
-| Workspace boundary | `docs/architecture/workspace_boundary.md` | #2 | Draft complete |
-| Project Profile | `docs/architecture/project_profile.md` | #2 | Draft complete |
-| Runtime layout | `docs/operations/runtime_layout.md` | #2 | Draft complete |
-| Control loop | `docs/architecture/control_loop.md` | #3 | Draft complete |
-| Authority/state | `docs/architecture/authority_and_state.md` | #3 | Draft complete |
-| Self-improvement | `docs/architecture/self_improvement.md` | #3/#5 | Draft complete |
-| Ports/adapters | `docs/architecture/ports_and_adapters.md` | #4 | Draft complete |
-| Security boundary | `docs/architecture/security_boundary.md` | #4 | Draft complete |
-| Canonical review | `docs/architecture/review_pipeline.md` | #4/#5 | Draft complete |
-| Yura migration | `docs/migration/ai_liver_yura.md` | #5 | Draft complete |
-| Integration/recovery | `docs/architecture/integration_recovery.md` | #6 | Draft complete |
-| E2E verification | `docs/operations/e2e_verification.md` | #6 | Draft complete |
-| GitHub workflow | `docs/operations/github_workflow.md` | #1 | Draft complete |
-| Implementation order | `docs/architecture/implementation_plan.md` | #1 | Draft complete |
+| Platform overview | `docs/architecture/overview.md` | #1 | Complete |
+| Workspace boundary | `docs/architecture/workspace_boundary.md` | #2 | Complete |
+| Project Profile | `docs/architecture/project_profile.md` | #2 | Complete |
+| Runtime layout | `docs/operations/runtime_layout.md` | #2 | Complete |
+| Control loop | `docs/architecture/control_loop.md` | #3 | Complete |
+| Authority/state | `docs/architecture/authority_and_state.md` | #3 | Complete |
+| Self-improvement | `docs/architecture/self_improvement.md` | #3/#5 | Complete |
+| Ports/adapters | `docs/architecture/ports_and_adapters.md` | #4 | Complete |
+| Security boundary | `docs/architecture/security_boundary.md` | #4 | Complete |
+| Canonical review | `docs/architecture/review_pipeline.md` | #4/#5 | Complete |
+| Yura migration | `docs/migration/ai_liver_yura.md` | #5 | Complete |
+| Integration/recovery | `docs/architecture/integration_recovery.md` | #6 | Complete |
+| E2E verification | `docs/operations/e2e_verification.md` | #6 | Complete |
+| GitHub workflow | `docs/operations/github_workflow.md` | #1 | Complete |
+| Implementation order | `docs/architecture/implementation_plan.md` | #1 | Complete |
 | Cross-design audit | `docs/architecture/cross_design_audit.md` | #1 | PASS / blocking contradiction 0 |
 
 ## 3. Required design questions
@@ -108,18 +108,24 @@ Status: Initial architecture complete pending Human confirmation
 - [x] Generic E2EをYura pilotより先に実施
 - [x] PostgreSQLをinitial bootstrap必須にしない
 
-## 4. Remaining Architecture Completion actions
+## 4. Architecture Completion evidence
 
-- [x] Cross-design auditを実施しblocking contradictionを0にする
-- [x] Architecture PR #7を単一lineageとして作成
-- [x] implementation start order確定
-- [ ] PR #7のfinal exact HEADをIssue checkpointへ同期
-- [ ] #2-#6へfinal design checkpointを同期
-- [ ] Parent #1へCompletion evidenceを集約
-- [ ] Human architecture confirmation
+- [x] Cross-design audit: blocking contradiction 0
+- [x] Architecture lineage: PR #7 / `design/initial-architecture`
+- [x] Approved exact design HEAD: `2399e5a0c5fc2a8401a590f3ea2ee0939eee7665`
+- [x] Human Architecture Confirmation: PASS on 2026-08-28
+- [x] PR #7 merged by normal merge with expected-head guard
+- [x] Canonical `main` readback: `8afea3d9c4f9000ab5524bd639baf9e54b366d83`
+- [x] #2-#6 design responsibilities completed
+- [x] Parent #1 completion evidence aggregated
 
-## 5. Implementation Freeze
+## 5. Implementation Gate
 
-上記remaining actionsが完了し、Issue #1でHuman confirmationを得るまでPlatform implementationを開始しない。
+Initial Architecture Freezeは解除済み。
 
-このFreezeは設計書の修正、GitHub状態監査、migration reconciliationを妨げない。
+ただし実装は`docs/architecture/implementation_plan.md`の順序と各実装Work Issueのfresh Start/Resume Gateに従う。
+
+- Architecture Completionを理由に既存Yura側implementation lineageを無条件移植しない。
+- 新しいimplementation Workは責務単位でIssue化し、開始予定日・終了予定日を設定する。
+- 同一責務にactive implementation lineageが存在する場合は新規branch作成前にreconcileする。
+- source-of-truth conflict、canonical mismatch、competing lineageがあればfail-closedする。
