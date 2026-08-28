@@ -10,13 +10,6 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
 
-[project.optional-dependencies]
-dev = [
-  "mypy>=1.10",
-  "pytest>=8.0",
-  "ruff>=0.6",
-]
-
 [tool.setuptools.packages.find]
 where = ["src"]
 
