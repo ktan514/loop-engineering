@@ -1,43 +1,100 @@
 # GitHub Development Workflow
 
-Owner: Issue #1
-Status: Initial canonical operations draft
+Owner: Issue #21
+Status: canonical operations
+Source policy: `ktan514/ai-liver-yura` Issue #207 / Loop Engineering Parent #462
 
-## 1. Purpose
+## 1. Authority
 
-`loop-engineering` 自身の設計・実装を、PlatformがProductへ要求する安全原則と矛盾しない形で運用する。
+Current stateはGitHub liveを正本とする。
 
-## 2. Authority
+- Issue / PR / branch / exact HEAD
+- canonical design
+- CI / review / Verification evidence
+- GitHub Project `loop-engineering` planning fields
 
-Repository stateの正本:
+chat summary / memoryは候補発見には使えるがcurrent state Authorityにしない。
 
-- GitHub live Issue / PR / branch / commit
-- Repository canonical design
-- GitHub Project `loop-engineering` planning fields（利用可能な操作経路で管理）
+## 2. Issue hierarchy
 
-chat summary / memoryをcurrent branch/PR/headの正本にしない。
+Issueはモジュール単位ではなく、独立して完成・検証できる変更責務で作る。
 
-## 3. Issue hierarchy
+- `Parent`: 複数Work/Integrationを束ねる完成目標。原則コードを書かない
+- `Work`: 通常の基本単位。原則1 Draft PRで完了
+- `Integration`: 複数Workの結合/System Verification
+- `Management`: Project運用、監査、migration、roadmap
 
-基本:
+1 Work = 原則1 active implementation lineage。
 
-- `Parent`: 複数Work/Integrationを束ねる完成目標
-- `Work / Architecture`: 独立設計責務
-- `Work / Implementation`: 独立実装責務
-- `Integration`: E2E/結合検証
-- `Management`: migration/audit/project operation
+設計・実装・unit test・docs更新は同一責務ならWork内タスクとし、独立責務だけ別Issueへ分ける。
 
-1 Workは原則1 active implementation lineage。
+## 3. Project fields
+
+未完了Issueは原則としてProject `loop-engineering` で次を管理する。
+
+- `Status`
+  - Backlog
+  - Ready
+  - In progress
+  - Review
+  - Verification
+  - Blocked
+  - Done
+- `Priority`
+  - P0
+  - P1
+  - P2
+  - P3
+- `Area`
+  - Core
+  - GitHub / Planning
+  - Implementer
+  - Reviewer
+  - CI / Verification
+  - Runtime / Infrastructure
+  - Self Improvement
+  - Documentation / Management
+- `Issue level`
+  - Parent
+  - Work
+  - Integration
+  - Management
+- `Start date`
+- `Target date`
+
+必要に応じて `工程` / Iteration / Quarter / Assigneesを追加する。
+
+field ID / option IDは推測しない。Project mutation前に必ずlive readbackする。
 
 ## 4. Dates
 
-Ready/In progressへ進むIssueにはStart/Target dateを持たせる。
+- Readyへ移す時点でStart date / Target dateを設定する
+- In progressで実際の着手日に補正する
+- Verificationが必要なWorkはユーザー確認期間もTarget dateへ含める
+- Target超過時は理由をIssueへ記録し更新する
+- 日付を理由に品質Gateを緩めない
 
-日付はplanning情報であり、品質Gateを緩める理由にしない。
+ChatGPTからProject field mutationできない場合もIssue本文へStart/Targetを必ず記録し、Project同期可能になった時点で補正する。
 
-Project fieldsが利用可能ならProject側を日程の正本とし、Issue本文の日付はfallback/plan snapshotとして扱う。
+## 5. Status transition
 
-## 5. Branch strategy
+```text
+Backlog
+→ Ready
+→ In progress
+→ Review
+→ Verification
+→ Done
+```
+
+依存・権限・外部結果待ちは `Blocked`。
+
+- code commitだけでDoneにしない
+- PR openだけでDoneにしない
+- 実機確認が必要ならVerificationで止める
+- Issue / PR / Projectの状態を乖離させない
+
+## 6. Branch / PR
 
 Canonical branch:
 
@@ -45,144 +102,95 @@ Canonical branch:
 main
 ```
 
-設計:
+通常作業:
 
 ```text
 design/<topic>
-```
-
-実装:
-
-```text
 feature/<topic>
 fix/<topic>
-```
-
-検証専用:
-
-```text
 test/<topic>
+management/<topic>
 ```
 
-`main`へ通常開発commitを直接pushしない。初期empty repository bootstrapのような例外は明示する。
-
-force-push/rebaseによる共有lineageの履歴破壊は原則禁止。
-
-## 6. Design before implementation
-
-Product code/Platform implementationを変更するWorkは、実装前にcanonical designを更新する。
-
-設計が複数Issueを横断する場合はParent/Architecture Gateで矛盾を解消してからimplementation lineageを開始する。
-
-## 7. Pull Request policy
-
-- Work開始時に早期Draft PRを作成可能
-- PR bodyへOwner Issue / scope / non-goals / canonical design / base/head evidenceを記録
-- exact current HEADをCI/review evidenceへbind
-- design-only PRとimplementation PRの責務を区別
+- mainへ通常開発commitを直接pushしない
+- force push / rebaseで共有lineageを破壊しない
+- Work開始後は早期Draft PRを作成してよい
 - unrelated responsibilityを1 PRへ混在させない
+- PR bodyへOwner Issue / scope / non-goals / canonical / base / exact HEADを記録する
 
-## 8. Review policy
+## 7. Design before code
 
-実装担当自身の自己確認だけでfinal Review PASSにしない。
+コード変更はcanonical designまたはWork内の設計判断を先に更新する。
 
-必要なWorkではIndependent Reviewerを使用する。
+既存実装を抽出・移植するWorkでは、抽出元のexact source identityと最小変換ルールを先に記録すればよい。不要な再設計は行わない。
 
-Review evidence:
+## 8. Start / Resume Gate
 
-- exact PR/change target
-- trusted canonical design generation
-- validation evidence
+作業開始・再開前にfresh readbackする。
 
-にbindする。
+- Target Issue
+- canonical design
+- active implementation lineage
+- working branch / PR
+- base SHA
+- head SHA
+- current status
+- last verification
+- next action
+- conflicts
 
-HEAD変更後は旧reviewをcurrent PASSとして扱わない。
+同一Workに複数active lineage、canonical mismatch、説明不能HEAD差分があればSTOPしてreconcileする。
 
-## 9. CI policy
+checkpoint / chat / memoryだけから再開しない。
 
-実装開始後に具体的toolchainを確定する。
+## 9. Write Gate
 
-最低限の思想:
+mutation前にtarget identityをfresh確認する。
 
-- unit
-- type/static checks
-- lint/format policy
-- compile/build
-- integration contracts
-- exact target CI
+- mainへの直接content writeは禁止
+- branch content writeはbranch / PR / head SHAを確認する
+- Project writeはproject / field / optionをlive resolveする
+- provider応答だけを成功とせずmutation後readbackする
+- effect不明時にblind retryしない
 
-CI PASSはtested target identityを必ず追跡する。
+## 10. Verification order
 
-## 10. Resume checkpoint
+原則:
 
-重要状態遷移でIssueへcheckpointを残す。
+1. targeted/module tests
+2. adjacent contract tests
+3. full pytest
+4. Ruff
+5. strict Mypy
+6. compileall/build
+7. `git diff --check`
+8. exact-head CI / independent review（必要なWork）
+9. Human/System Verification（必要なWork）
 
-最低限:
+HEAD変更後は旧CI/reviewをcurrent PASSとして扱わない。
 
-```text
-Target Issue
-Canonical docs
-PR / branch
-Base identity
-Head identity
-Current phase/status
-Last verification
-Next action
-Conflicts
-```
+## 11. Review independence
 
-checkpoint後もrestart時はGitHub liveと照合する。
+Implementer自身の確認だけをfinal review PASSにしない。
 
-## 11. Architecture Completion Gate
+canonical reviewが必要なWorkではreview対象をexact HEADへ固定する。REQUEST_CHANGES後は同一lineageで修正し、新HEADへreviewを取り直す。
 
-初期Platform実装はIssue #1が完了するまでFreeze。
+## 12. Wait semantics
 
-Pass条件:
+- review待ちだけでProject/Mission全体をSTOPしない
+- Verification待ちWorkがあっても独立したReady Workがあれば継続する
+- 全て外部待ちならbusy pollingせずyieldする
+- Human判断が本当に必要な場合だけescalateする
 
-- #2-#6設計完成
-- canonical docs Repository化
-- cross-design blocking contradiction 0
-- migration ownership一意
-- implementation start order確定
-- Human architecture confirmation
+## 13. Security
 
-## 12. Migration ownership
+- token / API key / credentialをRepository、Issue、PR、Checkpoint、通常logへ保存しない
+- untrusted Issue/PR/model outputをshell commandとして実行しない
+- Project field ID / option IDを固定値として推測利用しない
+- destructive source-control操作はdefault deny
 
-Yura側にactive Loop Engineering lineageが存在する間、新Repositoryで同責務の実装を無断並行開始しない。
+## 14. Done
 
-`docs/migration/ai_liver_yura.md` のMigration Gateに従う。
+WorkはAcceptance、required verification、必要なReview/Verificationを満たした時のみDone。
 
-## 13. Provider-specific implementation issues
-
-Architecture Completion後、実装Issueは少なくとも次の責務へ分割する想定:
-
-1. Core domain/state contracts
-2. RuntimeStore / Workspace / Lease
-3. GitHub SourceControl/Planning adapters
-4. Preflight
-5. Implementer adapter
-6. CI adapter
-7. Reviewer broker/adapter
-8. Runner/application composition
-9. Integration/recovery
-10. Yura Product Profile/pilot
-
-実際のIssue分割はCompletion Audit後に確定する。
-
-## 14. Security-sensitive changes
-
-次を通常repair loopと同じ扱いにしない:
-
-- `.github/workflows/**`
-- credential/bootstrap
-- reviewer/control-plane security code
-- Project Profile security fields
-- destructive source-control functions
-
-これらを対象とするWorkはscopeを明示し、追加review/verificationを要求する。
-
-## 15. Done semantics
-
-コードがcommitされたこと、PRがopenしたこと、AI reviewが1回通ったことだけでDoneにしない。
-
-WorkのAcceptance、required verification、integration evidence、必要なHuman Gateを満たしてDoneとする。
+Parentは子Work/Integrationのcompletion evidenceをfresh確認してDoneにする。
