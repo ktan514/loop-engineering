@@ -88,7 +88,7 @@ Supervisor
 
 ## 6. Product Profile trust
 
-Profileはtrusted canonical refからsnapshot化する。
+ProfileはHost ProjectRegistrationが指定するtrusted repository/ref/pathからsnapshot化する。
 
 PR branchが自身のControl Plane policyを変更できない。
 
@@ -100,6 +100,7 @@ PR branchが自身のControl Plane policyを変更できない。
 - protected path policy
 - secret logging prohibition
 - Write Gate / readback requirement
+- Profile自身のbootstrap trust anchor
 
 ## 7. Implementer boundary
 
@@ -147,7 +148,33 @@ Requirements:
 
 Reviewerが返す内容はcandidate verdictであり、Control Planeがschema/identity/stalenessをvalidateしてからtrusted ReviewEvidenceへ昇格する。
 
-## 9. Validation sandbox
+## 9. CI / validation execution boundary
+
+CI definitionとCIが実行するtarget codeは同じtrust levelとは限らない。
+
+特にsecret-bearing CIやSourceControl write capabilityを持つworkflowでは、PR/feature branchが変更したworkflow definitionをそのままtrusted control definitionとして実行してはならない。
+
+原則:
+
+```text
+trusted CI control definition
++ exact untrusted target source
+→ isolated validation
+→ target-bound evidence
+```
+
+Requirements:
+
+- CI control definitionのtrusted revisionをProfile/Host policyからresolveする
+- target branchのworkflow変更を、そのtarget自身のrequired gateへ自己適用しない
+- untrusted target codeへ不要なrepository/reviewer/host credentialを渡さない
+- `pull_request_target`等のsecret-bearing contextでuntrusted target codeをcheckout/executeしない
+- CI artifact/logをuntrusted dataとして扱う
+- CI resultをexact tested target identityへbindする
+
+Productがworkflow変更そのものをWork対象にする場合も、変更後workflowをcanonical化する前の検証は既存trusted control pathまたは専用security review経路で行う。
+
+## 10. Validation sandbox
 
 Product code/testを実行する環境は、可能な限りcredential-free isolationを使用する。
 
@@ -163,7 +190,7 @@ Product code/testを実行する環境は、可能な限りcredential-free isola
 
 Projectによって必要capabilityが異なるため、sandbox requirementはProfile + Host Policyで決定するが、安全条件を満たせない場合は`CAPABILITY` blockerとしてfail-closedできる。
 
-## 10. Source-control mutation
+## 11. Source-control mutation
 
 mutationはtrusted writer経路だけで行うことをpreferredとする。
 
@@ -178,7 +205,7 @@ mutationはtrusted writer経路だけで行うことをpreferredとする。
 
 例外が必要なoperationはHost Policyで明示し、Human approval等の追加Gateを持つ。
 
-## 11. Protected control files
+## 12. Protected control files
 
 Platform自身またはProduct側のControl Plane関連fileを通常repair loopで自動変更させないpolicyを持つ。
 
@@ -192,7 +219,7 @@ Platform自身またはProduct側のControl Plane関連fileを通常repair loop�
 
 対象Workが明示的にそのcontrol fileを所有する場合だけ、専用TaskPacket/Review policyで変更可能にする。
 
-## 12. Logging and diagnostics
+## 13. Logging and diagnostics
 
 ログへ残す:
 
@@ -214,7 +241,7 @@ Platform自身またはProduct側のControl Plane関連fileを通常repair loop�
 
 Redactionは不可逆とし、後で秘密値を復元できるhash/digestの扱いもthreat modelに含める。
 
-## 13. Prompt injection / data poisoning
+## 14. Prompt injection / data poisoning
 
 AIへ渡すIssue/PR/diffは「命令」ではなくレビュー/実装対象dataとしてrole separationする。
 
@@ -230,7 +257,7 @@ AI出力だけで:
 
 を行わない。
 
-## 14. Provider compromise/failure
+## 15. Provider compromise/failure
 
 1 providerのerrorや不正responseを別providerのAuthorityとして扱わない。
 
@@ -240,7 +267,7 @@ AI出力だけで:
 - Reviewerが「mergeした」と述べてもSCM effect truthにならない
 - runtime storeが「HEAD A」と保持していてもfresh SCM HEAD Bを上書きしない
 
-## 15. Destructive operations
+## 16. Destructive operations
 
 不可逆/高影響operationには追加Policy Gateを要求できる。
 
@@ -254,11 +281,12 @@ AI出力だけで:
 
 初期Platform実装では不要なdestructive operationをsupportしないことを優先する。
 
-## 16. Hard invariants
+## 17. Hard invariants
 
 - Reviewer credentialはImplementer/Workspaceへ渡さない
 - Reviewerへsource-control write credentialを渡さない
 - untrusted Product codeをsecret-bearing Host processでimport/executeしない
+- untrusted target workflowをsecret-bearing trusted CI definitionへ自己昇格させない
 - Issue/PR/model outputをcommandとして直接実行しない
 - Host policyをProduct configから弱めない
 - secretをrepository/checkpoint/logへ保存しない
