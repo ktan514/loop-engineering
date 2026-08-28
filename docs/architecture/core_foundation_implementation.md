@@ -20,6 +20,8 @@ Phase I Generic Core Foundationを、provider非依存・side-effect freeなDoma
 
 ```text
 pyproject.toml
+Pipfile
+Pipfile.lock
 src/
 └─ loop_engineering/
    ├─ __init__.py
@@ -46,7 +48,9 @@ tests/
 ### 0. Python Package / Toolchain Bootstrap
 
 Owns:
-- `pyproject.toml`
+- `pyproject.toml` のpackage/build metadataとtool configuration
+- `Pipfile` のlocal direct/dev dependency declaration
+- `Pipfile.lock` のresolved local dependency set
 - src-layout package skeleton
 - pytest bootstrap
 - Ruff configuration
@@ -55,6 +59,9 @@ Owns:
 - minimal repository ignore rules needed by the Python toolchain
 
 Rules:
+- ローカルPython依存環境はPipenvで管理する
+- `pyproject.toml` の optional dependency と `Pipfile` の二重管理を行わない
+- `Pipfile.lock` をcommitし、通常の環境再現はlockから行う
 - Core domain modelを先行実装しない
 - GitHub Actions等のCI providerを導入しない
 - provider SDK dependencyを追加しない
@@ -157,18 +164,36 @@ B/C/DはA完了後、相互にファイル競合しないよう境界を維持�
 ## 5. Toolchain baseline
 
 Phase I初期baseline:
-- Python: `>=3.10`
-- packaging/build: standard `pyproject.toml` + setuptools backend
+- Python: `>=3.10` package compatibility
+- local dependency/environment management: Pipenv
+- package/build metadata: `pyproject.toml` + setuptools backend
+- resolved local dependencies: committed `Pipfile.lock`
 - tests: pytest
 - lint/static quality: Ruff
 - typing: Mypy strict
 - layout: `src/`
+
+Dependency Authority:
+
+```text
+pyproject.toml
+  └─ package/build metadata + tool configuration
+
+Pipfile
+  └─ direct runtime/dev dependency declarations for local development
+
+Pipfile.lock
+  └─ resolved dependency versions used to reproduce the local environment
+```
+
+通常の環境構築は `pipenv sync --dev` を使用する。依存追加・更新時だけ `pipenv install` / `pipenv lock` により `Pipfile` と `Pipfile.lock` を更新する。
 
 Python 3.10互換を壊すlanguage featureを導入する場合は、別のdesign decisionとして本書/関連Issueを更新する。
 
 ## 6. Verification policy
 
 Bootstrap Work最低限:
+- `pipenv sync --dev` でlockから環境再現可能
 - package import smoke
 - pytest smoke
 - Ruff
