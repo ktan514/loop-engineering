@@ -6,8 +6,6 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from loop_engineering.core import (
-    canonical_digest,
-    canonical_json,
     CanonicalGeneration,
     Conflict,
     ConflictKind,
@@ -22,6 +20,8 @@ from loop_engineering.core import (
     RunGoalKind,
     SourceIdentity,
     WorkItem,
+    canonical_digest,
+    canonical_json,
 )
 
 
@@ -217,7 +217,7 @@ def test_observation_epoch_nested_serialization_is_deterministic() -> None:
 
     assert first_json == second_json
     assert canonical_digest(epoch) == canonical_digest(epoch)
-    assert '"observation_id":"obs:1"' in first_json
+    assert '\"observation_id\":\"obs:1\"' in first_json
 
 
 def test_canonical_serialization_rejects_unordered_or_unknown_values() -> None:
