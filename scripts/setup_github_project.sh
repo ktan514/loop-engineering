@@ -4,10 +4,13 @@ set -euo pipefail
 OWNER="${LOOP_PROJECT_OWNER:-ktan514}"
 PROJECT_TITLE="${LOOP_PROJECT_TITLE:-loop-engineering}"
 REPO="${LOOP_REPOSITORY:-ktan514/loop-engineering}"
+LABEL="${LOOP_LABEL:-loop-engineering}"
 
 command -v gh >/dev/null || { echo "gh is required" >&2; exit 1; }
 
 gh auth status >/dev/null
+
+gh label create "$LABEL" --repo "$REPO" --color ededed --force >/dev/null
 
 PROJECT_JSON="$(gh project list --owner "$OWNER" --format json)"
 PROJECT_NUMBER="$(python -c '
@@ -80,4 +83,4 @@ else:
     print("Status options: PASS")
 PY
 
-echo "Repository link + fields setup complete."
+echo "Repository link + label + fields setup complete."
