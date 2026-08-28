@@ -16,7 +16,7 @@ PROJECT_JSON="$(gh project list --owner "$OWNER" --format json)"
 PROJECT_NUMBER="$(python -c '
 import json,sys
 raw=json.load(sys.stdin)
-projects=raw.get("projects", raw if isinstance(raw,list) else [])
+projects=raw if isinstance(raw,list) else raw.get("projects", [])
 title=sys.argv[1]
 for p in projects:
     if p.get("title")==title:
