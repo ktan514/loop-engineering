@@ -25,6 +25,7 @@ Status: Initial architecture complete pending Human confirmation
 | Integration/recovery | `docs/architecture/integration_recovery.md` | #6 | Draft complete |
 | E2E verification | `docs/operations/e2e_verification.md` | #6 | Draft complete |
 | GitHub workflow | `docs/operations/github_workflow.md` | #1 | Draft complete |
+| Implementation order | `docs/architecture/implementation_plan.md` | #1 | Draft complete |
 | Cross-design audit | `docs/architecture/cross_design_audit.md` | #1 | PASS / blocking contradiction 0 |
 
 ## 3. Required design questions
@@ -98,10 +99,20 @@ Status: Initial architecture complete pending Human confirmation
 - [x] migration start gate
 - [x] stale Issue-recorded review targetをlive HEADより下位Authorityとして確認
 
+### Implementation planning
+
+- [x] Core foundationをadapterより先に実装
+- [x] Runtime/Leaseをremote Runnerより先に実装
+- [x] GitHub read/Preflight → write effectsの順序
+- [x] Implementer/CI/Reviewer boundaryをRunnerより先に確立
+- [x] Generic E2EをYura pilotより先に実施
+- [x] PostgreSQLをinitial bootstrap必須にしない
+
 ## 4. Remaining Architecture Completion actions
 
 - [x] Cross-design auditを実施しblocking contradictionを0にする
 - [x] Architecture PR #7を単一lineageとして作成
+- [x] implementation start order確定
 - [ ] PR #7のfinal exact HEADをIssue checkpointへ同期
 - [ ] #2-#6へfinal design checkpointを同期
 - [ ] Parent #1へCompletion evidenceを集約
