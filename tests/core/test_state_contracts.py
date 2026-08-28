@@ -24,7 +24,6 @@ from loop_engineering.core import (
     canonical_json,
 )
 
-
 T0 = datetime(2026, 8, 28, 10, 0, tzinfo=timezone.utc)
 T1 = T0 + timedelta(minutes=5)
 
