@@ -22,7 +22,7 @@ PROJECT_JSON="$(gh project list --owner "$OWNER" --format json)"
 PROJECT_NUMBER="$(python -c '
 import json,sys
 raw=json.load(sys.stdin)
-projects=raw.get("projects", raw if isinstance(raw,list) else [])
+projects=raw if isinstance(raw,list) else raw.get("projects", [])
 title=sys.argv[1]
 for p in projects:
     if p.get("title")==title:
@@ -36,10 +36,12 @@ fi
 
 ITEMS="$(gh project item-list "$PROJECT_NUMBER" --owner "$OWNER" --limit 100000 --format json)"
 PRESENT="$(ISSUE_URL="$ISSUE_URL" ITEMS="$ITEMS" python - <<'PY'
-import json,os
-url=os.environ["ISSUE_URL"]
-data=json.loads(os.environ["ITEMS"])
-print("yes" if any((item.get("content") or {}).get("url")==url for item in data.get("items",[])) else "no")
+import json
+import os
+
+url = os.environ["ISSUE_URL"]
+data = json.loads(os.environ["ITEMS"])
+print("yes" if any((item.get("content") or {}).get("url") == url for item in data.get("items", [])) else "no")
 PY
 )"
 
@@ -57,10 +59,12 @@ gh project item-edit "$PROJECT_NUMBER" --owner "$OWNER" --url "$ISSUE_URL" --fie
 
 READBACK="$(gh project item-list "$PROJECT_NUMBER" --owner "$OWNER" --limit 100000 --format json)"
 ISSUE_URL="$ISSUE_URL" READBACK="$READBACK" python - <<'PY'
-import json,os
-url=os.environ["ISSUE_URL"]
-data=json.loads(os.environ["READBACK"])
-item=next((x for x in data.get("items",[]) if (x.get("content") or {}).get("url")==url), None)
+import json
+import os
+
+url = os.environ["ISSUE_URL"]
+data = json.loads(os.environ["READBACK"])
+item = next((x for x in data.get("items", []) if (x.get("content") or {}).get("url") == url), None)
 if item is None:
     raise SystemExit("Project readback failed: item missing")
 print("Project item readback: PASS")
