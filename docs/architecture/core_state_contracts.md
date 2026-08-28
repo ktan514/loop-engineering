@@ -52,7 +52,11 @@ SourceIdentity
 - `revision_id`: current stateを区別するimmutable revision string
 - `observed_at`: observation evidence timestampでありstalenessの唯一の根拠ではない
 
-Equalityは全field一致。provider objectを内包しない。
+Identity equality/hashは `provider_kind / object_kind / stable_id / revision_id` で判定する。`observed_at` は観測metadataであり比較・hash対象外とする。同じHEADやblobを後から再観測してもexact identityは変化しない。
+
+Canonical serializationでは監査用snapshotとして`observed_at`も出力するが、identity-only digestが必要な箇所では`identity_payload()`相当の4 identity fieldだけを用いる。
+
+provider objectを内包しない。
 
 ## 5. ExecutionTarget
 
@@ -68,6 +72,8 @@ ExecutionTarget
 
 Review/CI/mergeでhead必須かどうかのtransition-specific判定は後続Decision/Effect Workの責務。本型はtarget identityの器だけを提供する。
 
+ExecutionTargetのexact-target比較も各SourceIdentityのidentity fieldを基準とし、再観測時刻だけの差をtarget movementとみなさない。
+
 ## 6. CanonicalGeneration
 
 ```text
@@ -78,7 +84,9 @@ CanonicalGeneration
 
 `from_refs()` はrefsをidentity keyでstable sortし、順序差だけでdigestが変化しないようにする。空generationは禁止。
 
-Digestはcanonical JSONのSHA-256 lowercase hexとする。
+Digest inputは各refの `provider_kind / object_kind / stable_id / revision_id` だけとし、`observed_at` を除外する。同じcanonical revisionsを別時刻に再観測してもgeneration digestは変化しない。
+
+Digestはidentity projectionのcanonical JSONをSHA-256し、lowercase hexとする。
 
 ## 7. Conflict
 
@@ -277,15 +285,18 @@ Rules:
 
 Serializationはcurrent-state Authorityを作るものではなく、equality/idempotency/snapshot identityを補助するdeterministic representationである。
 
+Snapshot全体のcanonical JSONには観測timestampを含めてよい。一方、SourceIdentity equality、ExecutionTarget identity比較、CanonicalGeneration digest等の**identity-only operation**では観測timestampを除外したidentity projectionを使用する。
+
 ## 14. Validation tests
 
 最低限:
 - blank identity拒否
 - naive datetime拒否
 - frozen mutation拒否
-- equal objectのcanonical JSON/digest一致
-- revision差でdigest変化
-- CanonicalGeneration refs入力順が違ってもdigest一致
+- 同一revisionを異なる`observed_at`で再観測してもSourceIdentity equality/hash一致
+- equal identity projectionのdigest一致
+- revision差でidentity digest変化
+- CanonicalGeneration refs入力順・観測時刻が違ってもdigest一致
 - unsupported arbitrary object/set拒否
 - ObservationEpochを含むnested serialization決定論性
 - provider SDK/importがCoreに存在しない
