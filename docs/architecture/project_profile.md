@@ -18,12 +18,13 @@ Control PlaneはProfileをtrusted sourceから解決し、snapshot identityを�
 ```text
 ProjectProfileSnapshot
 - project_identity
-- source_kind
-- repository_identity
+- profile_source_kind
+- profile_repository_identity
 - trusted_ref
 - trusted_commit_sha
 - config_path
 - config_blob_sha
+- target_repository_identity
 - schema_version
 - normalized_profile_digest
 ```
@@ -39,7 +40,7 @@ Profile自身に「どのrepository/ref/pathのProfileを信頼するか」を�
 ```text
 ProjectRegistration
 - project_identity
-- repository_identity
+- profile_repository_identity
 - profile_source_kind
 - trusted_profile_ref
 - trusted_profile_path
@@ -50,15 +51,28 @@ ProjectRegistration
 
 ```text
 Host ProjectRegistration
-→ trusted repository/ref/path
+→ trusted profile repository/ref/path
 → fetch Project Profile
 → schema/policy validation
+→ resolve target repository from Profile
 → ProjectProfileSnapshot
 ```
+
+`profile_repository_identity` はProfileを保管するrepository、Profile内の `source_control.repository` は開発対象Product repositoryであり、同じとは限らない。
+
+典型構成ではProduct repository自身にProfileを置けるが、将来central profile repositoryを使用する構成も許容する。
 
 Project Profile内で`canonical_branch`等を指定することはできるが、それはProductのsource/design canonicalを表す値であり、**Profile自身を取得するtrust anchorとは別物**とする。
 
 Profile変更PRが`trusted_profile_ref`や`trusted_profile_path`を変更しようとしても、その変更を自己適用しない。trust anchor変更はHost registrationの明示更新として扱い、必要に応じてHuman/Policy Gateを要求する。
+
+### 2.2 Target repository binding
+
+Profileが指定したtarget repositoryはRun開始時にstable provider identityへ解決する。
+
+表示名/URL文字列だけでexecution targetを確定しない。
+
+Host registrationが特定target repositoryを制約している場合、Profileのtarget repositoryと不一致ならconfiguration conflictとしてfail-closedする。
 
 ## 3. Configuration precedence
 
@@ -130,7 +144,7 @@ verification:
 Profileで指定してよいもの:
 
 - provider adapter selection
-- repository identity mapping
+- target repository identity mapping
 - canonical branch/ref
 - planning provider/project mapping
 - WorkItem mapping strategy
@@ -183,10 +197,11 @@ shell interpolationを必要とする場合は明示的なhigh-risk capability�
 ```text
 ProjectIdentity
 → Host ProjectRegistration resolve
-→ trusted repository/ref/path resolve
+→ trusted profile repository/ref/path resolve
 → fetch profile blob
 → schema validate
 → mandatory policy merge
+→ target repository stable identity resolve
 → normalized snapshot
 → digest
 → ObservationEpochへbind
@@ -228,6 +243,8 @@ Yura Issue body Canonical section
 
 - PR branch自身にControl Plane policyを自己変更させない
 - Profile自身にbootstrap trust anchorを自己変更させない
+- profile repositoryとtarget Product repositoryを同一概念にしない
+- target repositoryはstable provider identityへresolveする
 - secretsをProfileへ保存しない
 - Host safety policyをProductから緩和不可
 - schema versionを明示する
