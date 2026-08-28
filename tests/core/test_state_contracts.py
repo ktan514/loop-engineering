@@ -65,14 +65,21 @@ def test_source_identity_rejects_blank_and_naive_timestamp() -> None:
 
 def test_core_contracts_are_frozen() -> None:
     identity = source()
+    field_name = "revision_id"
 
     with pytest.raises(FrozenInstanceError):
-        setattr(identity, "revision_id", "sha-b")
+        setattr(identity, field_name, "sha-b")
 
 
 def test_execution_target_digest_uses_identity_not_observation_time() -> None:
-    first = ExecutionTarget(repository_identity=source(observed_at=T0), head_identity=source(observed_at=T0))
-    later = ExecutionTarget(repository_identity=source(observed_at=T1), head_identity=source(observed_at=T1))
+    first = ExecutionTarget(
+        repository_identity=source(observed_at=T0),
+        head_identity=source(observed_at=T0),
+    )
+    later = ExecutionTarget(
+        repository_identity=source(observed_at=T1),
+        head_identity=source(observed_at=T1),
+    )
     changed = ExecutionTarget(
         repository_identity=source(observed_at=T1),
         head_identity=source(revision_id="sha-b", observed_at=T1),
@@ -83,9 +90,24 @@ def test_execution_target_digest_uses_identity_not_observation_time() -> None:
 
 
 def test_canonical_generation_is_order_and_observation_time_independent() -> None:
-    design_a_early = source(object_kind="blob", stable_id="design:a", revision_id="blob-a", observed_at=T0)
-    design_a_late = source(object_kind="blob", stable_id="design:a", revision_id="blob-a", observed_at=T1)
-    design_b = source(object_kind="blob", stable_id="design:b", revision_id="blob-b", observed_at=T0)
+    design_a_early = source(
+        object_kind="blob",
+        stable_id="design:a",
+        revision_id="blob-a",
+        observed_at=T0,
+    )
+    design_a_late = source(
+        object_kind="blob",
+        stable_id="design:a",
+        revision_id="blob-a",
+        observed_at=T1,
+    )
+    design_b = source(
+        object_kind="blob",
+        stable_id="design:b",
+        revision_id="blob-b",
+        observed_at=T0,
+    )
 
     first = CanonicalGeneration.from_refs((design_a_late, design_b, design_a_early))
     second = CanonicalGeneration.from_refs((design_b, design_a_late))
@@ -102,10 +124,18 @@ def test_canonical_generation_rejects_empty_refs() -> None:
 
 
 def test_conflict_and_evidence_are_provider_neutral_values() -> None:
-    repository = source(object_kind="repository", stable_id="repo:example", revision_id="repo-rev")
+    repository = source(
+        object_kind="repository",
+        stable_id="repo:example",
+        revision_id="repo-rev",
+    )
     head = source()
     target = ExecutionTarget(repository_identity=repository, head_identity=head)
-    evidence_source = source(object_kind="check", stable_id="ci:1", revision_id="run:1")
+    evidence_source = source(
+        object_kind="check",
+        stable_id="ci:1",
+        revision_id="run:1",
+    )
     evidence = Evidence(
         evidence_id="evidence:1",
         kind="CI",
@@ -128,8 +158,26 @@ def test_conflict_and_evidence_are_provider_neutral_values() -> None:
 
 
 def test_observation_epoch_nested_serialization_is_deterministic() -> None:
-    repository = source(object_kind="repository", stable_id="repo:example", revision_id="repo-rev")
-    issue = source(object_kind="work", stable_id="work:10", revision_id="issue-rev")
+    repository = source(
+        object_kind="repository",
+        stable_id="repo:example",
+        revision_id="repo-rev",
+    )
+    issue = source(
+        object_kind="work",
+        stable_id="work:10",
+        revision_id="issue-rev",
+    )
+    canonical_design = source(
+        object_kind="blob",
+        stable_id="design:core",
+        revision_id="blob-1",
+    )
+    branch = source(
+        object_kind="branch",
+        stable_id="branch:core-state",
+        revision_id="sha-a",
+    )
     goal = RunGoal(
         goal_id="goal:phase-1",
         kind=RunGoalKind.PROJECT_QUEUE,
@@ -143,14 +191,14 @@ def test_observation_epoch_nested_serialization_is_deterministic() -> None:
         work_type="implementation",
         status="in-progress",
         priority="P0",
-        canonical_design_refs=(source(object_kind="blob", stable_id="design:core", revision_id="blob-1"),),
+        canonical_design_refs=(canonical_design,),
     )
     lineage = Lineage(
         lineage_id="lineage:10",
         work_id="10",
         classification=LineageClassification.ACTIVE,
         repository_identity=repository,
-        branch_identity=source(object_kind="branch", stable_id="branch:core-state", revision_id="sha-a"),
+        branch_identity=branch,
         head_identity=source(),
     )
     epoch = ObservationEpoch(
@@ -184,7 +232,11 @@ def test_invalid_model_text_is_rejected() -> None:
     with pytest.raises(ValueError, match="work_id"):
         WorkItem(
             work_id=" ",
-            source_identity=source(object_kind="work", stable_id="work:blank", revision_id="1"),
+            source_identity=source(
+                object_kind="work",
+                stable_id="work:blank",
+                revision_id="1",
+            ),
             work_type="implementation",
             status="ready",
         )
