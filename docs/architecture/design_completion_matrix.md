@@ -1,7 +1,7 @@
 # Architecture Completion Matrix
 
 Owner: Issue #1
-Status: Initial gate matrix
+Status: Initial architecture complete pending Human confirmation
 
 ## 1. Purpose
 
@@ -25,7 +25,7 @@ Status: Initial gate matrix
 | Integration/recovery | `docs/architecture/integration_recovery.md` | #6 | Draft complete |
 | E2E verification | `docs/operations/e2e_verification.md` | #6 | Draft complete |
 | GitHub workflow | `docs/operations/github_workflow.md` | #1 | Draft complete |
-| Cross-design audit | `docs/architecture/cross_design_audit.md` | #1 | Pending in current lineage |
+| Cross-design audit | `docs/architecture/cross_design_audit.md` | #1 | PASS / blocking contradiction 0 |
 
 ## 3. Required design questions
 
@@ -37,6 +37,7 @@ Status: Initial gate matrix
 - [x] typed blocker scope
 - [x] trusted Project Profile source
 - [x] Profile bootstrap trust anchorをHost registrationに分離
+- [x] Profile repositoryとtarget Product repositoryを分離
 
 ### Control Loop
 
@@ -75,6 +76,7 @@ Status: Initial gate matrix
 - [x] protected control file policy
 - [x] destructive operation default deny
 - [x] Profile self-trust変更禁止
+- [x] trusted CI control definitionとuntrusted targetを分離
 
 ### Recovery
 
@@ -98,8 +100,9 @@ Status: Initial gate matrix
 
 ## 4. Remaining Architecture Completion actions
 
-- [ ] Cross-design auditを実施しblocking contradictionを0にする
-- [ ] PR #7のcurrent HEADを記録
+- [x] Cross-design auditを実施しblocking contradictionを0にする
+- [x] Architecture PR #7を単一lineageとして作成
+- [ ] PR #7のfinal exact HEADをIssue checkpointへ同期
 - [ ] #2-#6へfinal design checkpointを同期
 - [ ] Parent #1へCompletion evidenceを集約
 - [ ] Human architecture confirmation
