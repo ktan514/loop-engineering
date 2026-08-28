@@ -17,8 +17,10 @@ Status: Initial gate matrix
 | Runtime layout | `docs/operations/runtime_layout.md` | #2 | Draft complete |
 | Control loop | `docs/architecture/control_loop.md` | #3 | Draft complete |
 | Authority/state | `docs/architecture/authority_and_state.md` | #3 | Draft complete |
+| Self-improvement | `docs/architecture/self_improvement.md` | #3/#5 | Draft complete |
 | Ports/adapters | `docs/architecture/ports_and_adapters.md` | #4 | Draft complete |
 | Security boundary | `docs/architecture/security_boundary.md` | #4 | Draft complete |
+| Canonical review | `docs/architecture/review_pipeline.md` | #4/#5 | Draft complete |
 | Yura migration | `docs/migration/ai_liver_yura.md` | #5 | Draft complete |
 | Integration/recovery | `docs/architecture/integration_recovery.md` | #6 | Draft complete |
 | E2E verification | `docs/operations/e2e_verification.md` | #6 | Draft complete |
@@ -34,6 +36,7 @@ Status: Initial gate matrix
 - [x] multi-worktree identity
 - [x] typed blocker scope
 - [x] trusted Project Profile source
+- [x] Profile bootstrap trust anchorをHost registrationに分離
 
 ### Control Loop
 
@@ -43,6 +46,7 @@ Status: Initial gate matrix
 - [x] Run disposition
 - [x] ScheduleKey/idempotency
 - [x] Write Gate/effect receipt
+- [x] Self-Improvementをnormal Work Gateへ接続
 
 ### Authority
 
@@ -60,6 +64,7 @@ Status: Initial gate matrix
 - [x] CI / Implementer / Reviewer ports
 - [x] RuntimeStore / Lease / Workspace ports
 - [x] provider-neutral adapter error model
+- [x] canonical Reviewer pipeline / request identity
 
 ### Security
 
@@ -69,6 +74,7 @@ Status: Initial gate matrix
 - [x] Host policy precedence
 - [x] protected control file policy
 - [x] destructive operation default deny
+- [x] Profile self-trust変更禁止
 
 ### Recovery
 
@@ -88,6 +94,7 @@ Status: Initial gate matrix
 - [x] Yura-specific RunGoal/Project policy separation
 - [x] no-wholesale-cherry-pick rule
 - [x] migration start gate
+- [x] stale Issue-recorded review targetをlive HEADより下位Authorityとして確認
 
 ## 4. Remaining Architecture Completion actions
 
