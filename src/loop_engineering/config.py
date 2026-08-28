@@ -17,15 +17,16 @@ class LoopEngineConfig:
     issue_level: str = "Work"
 
     def __post_init__(self) -> None:
-        for name in (
-            "repository",
-            "owner",
-            "label",
-            "trunk_branch",
-            "improvement_area",
-            "issue_level",
-        ):
-            if not getattr(self, name).strip():
+        text_fields = (
+            ("repository", self.repository),
+            ("owner", self.owner),
+            ("label", self.label),
+            ("trunk_branch", self.trunk_branch),
+            ("improvement_area", self.improvement_area),
+            ("issue_level", self.issue_level),
+        )
+        for name, value in text_fields:
+            if not value.strip():
                 raise ValueError(f"{name} must not be blank")
         if self.project_number < 1:
             raise ValueError("project_number must be positive")
