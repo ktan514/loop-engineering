@@ -5,25 +5,41 @@ Status: Bootstrap operations baseline
 
 ## Environment
 
-Python 3.10以上を使用する。
+ローカルPython依存環境はPipenvで管理する。
+
+初回または依存変更時:
 
 ```bash
-python -m venv .venv
-. .venv/bin/activate
-python -m pip install -e '.[dev]'
+pipenv install --dev
 ```
+
+`Pipfile.lock` が存在する通常の環境再現:
+
+```bash
+pipenv sync --dev
+```
+
+依存追加・更新時は `Pipfile` と `Pipfile.lock` を同じ変更で更新する。
 
 ## Verification
 
 ```bash
-python -m pytest
-python -m ruff check src tests
-python -m mypy --strict src tests
-python -m compileall -q src tests
+pipenv run pytest
+pipenv run ruff check src tests
+pipenv run mypy --strict src tests
+pipenv run python -m compileall -q src tests
 git diff --check
 ```
 
 各実装Workはtargeted testを先に実行し、その後必要に応じて上記full local gatesを実行する。
+
+## Dependency authority
+
+- `pyproject.toml`: package/build metadata、pytest/Ruff/Mypy等のtool configuration
+- `Pipfile`: direct runtime/dev dependency declaration
+- `Pipfile.lock`: resolved dependency versions / reproducible local environment
+
+`pyproject.toml` のoptional dev dependenciesと`Pipfile`を二重管理しない。
 
 ## Boundary
 
