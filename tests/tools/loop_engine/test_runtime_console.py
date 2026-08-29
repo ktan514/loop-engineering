@@ -5,7 +5,7 @@ from pathlib import Path
 
 from pytest import CaptureFixture
 
-from tools.loop_engine.runtime_console import RuntimeConsole, VisibleSubprocessLocalRunner
+from loop_engineering.runtime_console import RuntimeConsole, VisibleSubprocessLocalRunner
 
 
 def test_streamed_child_output_is_hidden_by_default_but_persisted(
