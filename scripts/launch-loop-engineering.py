@@ -27,6 +27,7 @@ def main() -> int:
     from loop_engineering.host_launcher import (
         EnvironmentSecretProvider,
         GitHubCredentialUnavailable,
+        LaunchEnvironment,
         build_launch_environment,
         launch_vscode,
     )
@@ -52,8 +53,6 @@ def main() -> int:
             env=environment,
             check=False,
         ).returncode
-
-    from loop_engineering.host_launcher import LaunchEnvironment
 
     launch_vscode(root, LaunchEnvironment(environment))
     return 0
