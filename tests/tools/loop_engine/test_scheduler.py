@@ -1,7 +1,7 @@
 from dataclasses import replace
 
-from tools.loop_engine.models import MissionSnapshot
-from tools.loop_engine.scheduler import is_duplicate, schedule_key, select_work
+from loop_engineering.models import MissionSnapshot
+from loop_engineering.scheduler import is_duplicate, schedule_key, select_work
 
 from .conftest import epoch, identity, work
 
