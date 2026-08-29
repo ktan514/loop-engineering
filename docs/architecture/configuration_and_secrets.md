@@ -1,6 +1,6 @@
 # 設定ファイルと秘密情報の境界
 
-管理Issue: #31
+管理Issue: #31, #36
 状態: standalone設定正本
 
 ## 1. 目的
@@ -29,6 +29,8 @@ config/loop-engineering.example.ini
 設定ファイルを別場所に置く場合は、CLIの`--config <path>`または非秘密の環境変数`LOOP_CONFIG_FILE`で設定ファイル自体を選択できる。
 
 Workspace pathそのものをCLI引数や環境変数で通常上書きしない。Workspace pathのAuthorityは選択された設定ファイルとする。
+
+Loop EngineeringのPythonコードがファイルとして直接ロードする実行設定はこのconfigであり、`.env`を直接探索・読込しない。
 
 ## 3. Workspace
 
@@ -93,7 +95,7 @@ reviewer_api_key_env = OPENAI_API_KEY
 
 `reviewer_api_key_env`には秘密値ではなく環境変数名だけを書く。OpenAI API keyの標準環境変数名は`OPENAI_API_KEY`とし、`OPENAI_API_KEY_REVIEWER`は使用しない。
 
-## 6. 秘密情報
+## 6. 秘密情報と`.env`
 
 次のような値は設定ファイル・Repository・Issue・PR・Checkpoint・通常logへ直接保存しない。
 
@@ -103,14 +105,18 @@ reviewer_api_key_env = OPENAI_API_KEY
 - private key
 - reviewer credential
 
-実値は`.env`またはホスト側の秘密情報sourceに置く。
+Repository rootの`.env`はPipenvが標準機能で自動読込するdotenvファイルとして使用する。
 
-現時点で必須として確定しているローカル秘密値は次である。
+現時点の最小構成:
 
-```bash
-export GH_TOKEN="..."
-export OPENAI_API_KEY="..."
+```dotenv
+OPENAI_API_KEY=
+GH_TOKEN=
 ```
+
+`.env`には単純な環境変数だけを記載する。shell command substitution、`find`、`dirname`、PATH組立処理を置かない。
+
+`CODEX_BIN`や`PATH`などshell自体の実行環境設定はzsh側の設定ファイルで管理する。
 
 `LOOP_POSTGRES_DSN`と`LOOP_TRUSTED_REVIEWER_SOCKET`は利用契約が未確定のため、ローカル`.env`へ空値や自己参照値を置かない。必要性と値を確定した時点で追加する。
 
@@ -124,7 +130,9 @@ export OPENAI_API_KEY="..."
 pipenv run python -m loop_engineering
 ```
 
-Pipenvがproject rootの`.env`を読み込むため、Loop Engineering自身で独自の秘密情報ファイル探索を行わない。
+Pipenvがproject rootの`.env`を自動読込して子process環境へ注入する。通常起動前に`source .env`を要求しない。
+
+Loop Engineering自身は`.env`をloadせず、注入済み環境変数を参照しながら`config/loop-engineering.ini`をロードする。
 
 既にホスト環境へ注入された環境変数も同じ契約で使用できる。
 
@@ -144,6 +152,11 @@ CLI overrideは設定ファイルの選択等の明示的な一時変更に限�
 ## 9. Hard invariants
 
 - Workspace pathは選択された設定ファイルから解決する
+- Pythonコードは`.env`を直接loadしない
+- `.env`はPipenvが自動読込するdotenvとして扱う
+- `.env`へshell command substitutionを書かない
+- `CODEX_BIN` / `PATH`はzsh側で管理する
+- 通常起動前に`source .env`を要求しない
 - 秘密情報の実値を設定ファイルへ保存しない
 - 設定ファイルには秘密情報の環境変数名を記録できる
 - OpenAI API keyの標準環境変数名は`OPENAI_API_KEY`とする
