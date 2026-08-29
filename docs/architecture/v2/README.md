@@ -1,5 +1,11 @@
 # Loop Engineering 正本索引
 
+## standalone配置
+
+- `standalone_package_layout.md` — standalone Repositoryのpackage / module実行 / 試験配置の上位正本
+
+AI Liverゆら由来の設計文書に`tools/loop_engine/**`配置が残る場合でも、standalone Repositoryの配置・module invocation・試験配置については`standalone_package_layout.md`を優先する。
+
 ## 中核
 
 - `loop_mission_supervisor.md` — Mission監督、再調整、Work選択、Resume Gate、Task Packet、Write Gate
