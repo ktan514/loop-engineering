@@ -1,67 +1,84 @@
 # V2 コミットメッセージ日本語運用
 
-状態: 正本追補案
-適用日: 2026-08-13
-親Issue: #317
-管理Issue: #384
+状態: 統合正本
+適用日: 2026-08-29
 関連正本:
+- `AGENTS.md`
 - `docs/architecture/v2/project_v2_management_spec.md`
 - `docs/architecture/v2/branch_lifecycle_and_commit_hygiene.md`
 
 ## 1. 原則
 
-V2で人間またはAIが作成するコミットメッセージは、日本語を主要言語とする。
+コミットメッセージの**変更説明は日本語**を主要言語とする。
 
-技術識別子として必要な英字・数字は使用してよい。
+一方、変更種別を表す短いprefixは運用識別子なので英語のまま使用してよい。
 
-例:
+推奨例:
 
-- `V2管理: ブランチライフサイクルを整理する (#384)`
-- `Body: 姿勢生成契約の回帰テストを追加する (#335)`
-- `Foundation: revision検証の回帰テストを追加する (#321)`
-- `Codex修正基盤: 認証情報の隔離境界を強化する (#372)`
+- `feat: Workspace設定の読み込みを追加する`
+- `fix: Mission Checkpointの対象解決を修正する`
+- `docs: 設定手順を更新する`
+- `test: 回帰試験を追加する`
+- `refactor: 実装正本をsrc packageへ統一する`
+- `chore: 開発補助設定を整理する`
 
-英語のConventional Commits接頭辞を標準形式として使用しない。
+機能追加を表すprefixは **`feature` ではなく `feat` に統一**する。
 
-禁止例:
+新規に次は使用しない。
 
-- `feat(v2): add validation`
-- `fix: repair state transition`
-- `docs(v2): update architecture`
-- `test: add regression case`
-- `chore: cleanup`
-- `fix!: 不具合を修正する`
-- `fix(v2)!: 不具合を修正する`
-- `security(v2)!: 認証処理を修正する`
-- `deps: 依存関係を更新する`
+- `feature: ...`
+- `feature/...` を新しいbranch prefixとして使用すること
 
-Conventional Commitsのbreaking-change記法である任意の`!`を付けても、この禁止を回避できない。
+既存branchや過去履歴の `feature/...` は、名称変更だけを理由に履歴を書き換えず旧名称として扱う。
 
 ## 2. 件名
 
 コミット件名は次を満たす。
 
-1. 日本語文字（ひらがな、カタカナ、漢字）のいずれかを含む。
+1. prefix以降の変更説明に日本語文字（ひらがな、カタカナ、漢字）のいずれかを含む。
 2. 変更目的を日本語で説明する。
-3. 英語Conventional Commit形式の接頭辞で開始しない。scopeやbreaking-change用`!`を付けた形式も同様に禁止する。
-4. ASCIIだけの`<type>:`形式を使用する場合、プロジェクトが明示的に許可した技術領域名だけを使用できる。
-5. `x` / `noop` / `trigger` 等、意味のない履歴生成用件名を使用しない。
-6. 対象Issueがある場合は原則として末尾に `(#番号)` を付ける。
+3. prefixだけ、英単語だけ、placeholderだけの件名を使用しない。
+4. `x` / `noop` / `trigger` 等、意味のない履歴生成用件名を使用しない。
+5. 対象Issueを件名へ付ける場合は `(#番号)` 等、追跡可能な形式を使用してよい。
 
-## 3. 許可するASCII技術領域prefix
+## 3. 許可する識別prefix
 
-日本語説明の前に置く技術領域名として、次を許可する。
+通常使用するprefix:
 
-- `Body:`
-- `Foundation:`
+- `feat:` 機能追加
+- `fix:` 不具合修正
+- `docs:` 文書変更
+- `test:` 試験変更
+- `refactor:` 動作目的を変えない構造整理
+- `chore:` 開発・運用補助
+- `perf:` 性能改善
+- `build:` build/package変更
+- `ci:` CI変更
+- `revert:` 変更の取り消し
 
-上記以外のASCII-only `<type>:` / `<type>(scope):` / `<type>!:` / `<type>(scope)!:` はConventional Commit形式または曖昧な英語prefixとして拒否する。
+必要に応じてscopeを付けた `feat(core): ...` のような形式も識別子として許可する。ただし説明本文は日本語にする。
 
-新しいASCII技術領域prefixが必要な場合は、この正本へ先に追加してから使用する。
+breaking changeを示す `!` も機械識別として使用できるが、説明は日本語で記述する。
 
-`V2管理:` や `Codex修正基盤:` のようにprefix自体へ日本語が含まれる形式は、このASCII allowlistの対象外であり通常の日本語件名として扱う。
+例:
 
-## 4. 本文
+- `feat(core)!: 設定契約を新形式へ変更する`
+
+## 4. branch prefix
+
+新規branchの機能追加系prefixは `feat/` に統一する。
+
+例:
+
+- `feat/workspace-config`
+- `fix/checkpoint-resolution`
+- `docs/runtime-guide`
+- `test/host-runtime-regression`
+- `refactor/package-boundary`
+
+`feature/` は新規branchでは使用しない。
+
+## 5. 本文
 
 コミット本文を付ける場合も説明文は日本語を主要言語とする。
 
@@ -74,28 +91,26 @@ Conventional Commitsのbreaking-change記法である任意の`!`を付けても
 - SHA
 - テストツール名
 - GitHub Status名などの技術識別子
+- `feat` / `fix` 等の運用識別prefix
 
-## 5. Merge commit
+## 6. Merge commit
 
-GitHubでmerge commitを作成する場合、merge commitのタイトル・本文も日本語を主要言語とする。
+GitHubでmerge commitを作成する場合も説明部分は日本語を主要言語とする。
 
-PRタイトルが日本語でない場合でも、merge時に日本語タイトルを明示してから実行する。
+PRタイトルが適切なら、その日本語説明をmerge commitへ使用できる。
 
-Gitが自動生成する英語の`Merge ...`件名をそのまま使用しない。
+## 7. 機械検査
 
-## 6. 機械検査
+Commit Hygiene Guardを実装する場合は少なくとも次を拒否する。
 
-V2 Commit Hygiene Guardは少なくとも次を拒否する。
-
-- 件名に日本語文字が1文字もないコミット
-- 許可されていないASCII-only colon prefix
-- scope付き・`!`付きの任意の英語Conventional Commit形式
+- prefix以降の説明が英語だけのcommit
 - placeholder / no-op / trigger-onlyコミット
+- 新規の `feature:` prefix
 
-技術識別子に英字が含まれること自体は拒否しない。
+`feat:` / `fix:` 等のASCII prefix自体は拒否しない。
 
-## 7. 既存履歴
+## 8. 既存履歴
 
-未マージbranchの英語コミットメッセージは、他lineageが依存していないことを確認したうえでmerge前に日本語へ修正する。
+既存の `feature/...` branch、既存の英語prefix、共有済みSHAは、名称統一だけを理由にforce rewriteしない。
 
-すでに共有trunkへmerge済みの履歴は、メッセージ修正だけを理由に無計画なforce rewriteを行わない。履歴を書き換える場合は、影響するbranch、PR、checkpoint、SHA参照を列挙し、専用のreconciliation手順で一括して実施する。
+説明本文まで英語のみで、かつ安全に修正可能な未共有履歴を整理する場合は日本語化してよい。共有済み履歴を書き換える場合は、影響するbranch、PR、Checkpoint、SHA参照を列挙した専用の再調整手順を必要とする。
