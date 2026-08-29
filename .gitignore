@@ -4,6 +4,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+.env
+config/loop-engineering.ini
 build/
 dist/
 *.egg-info/

@@ -1,7 +1,7 @@
 # Platform / Product / Runtime Workspace Boundary
 
 Owner: Issue #2
-Status: Initial canonical architecture draft
+Status: canonical architecture
 
 ## 1. Goal
 
@@ -163,24 +163,41 @@ RuntimeStorePort
 
 RuntimeStoreの障害時に、GitHub等のlive stateを捏造して継続してはならない。必要なidempotency/recovery evidenceが失われる場合は該当transitionを停止する。
 
-## 7. Workspace discovery
+## 7. Workspace discovery / registration
 
-Workspaceは次の2方式を許容する。
+Workspace pathはHost側の設定ファイルへ明示的に登録する。
 
-1. explicit registration
-2. CLI起動時のexplicit path指定
+既定設定:
 
-暗黙にホームディレクトリ全体を走査してProductを発見しない。
+```text
+config/loop-engineering.ini
+```
 
-Workspace登録時に最低限検証する:
+例:
 
-- repository identity
+```ini
+[project]
+key = ai-liver-yura
+workspace_path = /absolute/path/to/ai-liver-yura
+repository = ktan514/ai-liver-yura
+```
+
+CLIから任意のworkspace pathを直接注入することを通常経路にしない。別設定を使用する場合、CLIは`--config <path>`で設定ファイルを選択するだけとする。
+
+ホームディレクトリ全体を走査してProductを暗黙発見しない。
+
+Workspace登録・起動時に最低限検証する:
+
 - path canonicalization
+- `git rev-parse --show-toplevel`
+- remote repository identity
 - writable/read-only capability
 - current ref / head
-- dirty state
+- dirty/untracked state
 - nested repository ambiguity
 - Product Profile source
+
+設定ファイルのRepositoryIdentityとWorkspaceで観測したRepositoryIdentityが一致しなければfail-closedする。
 
 ## 8. Workspace mutation guard
 
@@ -206,6 +223,8 @@ Project B: actionable
 → Bを選択可能
 ```
 
+複数Productを扱う場合も、各ProjectのWorkspace pathとRepositoryIdentityはそれぞれの設定ファイルまたは将来のProject Registration indexから明示的に解決する。
+
 ただしGLOBAL/SECURITY blockerは全Productへ適用できる。
 
 ## 10. Hard invariants
@@ -214,5 +233,7 @@ Project B: actionable
 - secretをProduct profile/runtime checkpointへ保存しない
 - 同一repositoryの複数workspaceを区別する
 - filesystem pathだけでProjectIdentityを決めない
+- Workspace pathはHost設定ファイルへ明示する
+- CLIで任意workspaceを直接差し替えることを通常経路にしない
 - blockerを単純なstop-file semanticsへ固定しない
 - Product内のuntrusted branchからHost Runtime policyを上書きさせない
