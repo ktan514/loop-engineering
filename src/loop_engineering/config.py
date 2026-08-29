@@ -212,8 +212,8 @@ class LoopEngineeringSettings:
                 credentials.get("github_token_env", "GH_TOKEN").strip() or "GH_TOKEN"
             ),
             reviewer_api_key_env=(
-                models.get("reviewer_api_key_env", "OPENAI_API_KEY_REVIEWER").strip()
-                or "OPENAI_API_KEY_REVIEWER"
+                models.get("reviewer_api_key_env", "OPENAI_API_KEY").strip()
+                or "OPENAI_API_KEY"
             ),
             operational_store_dsn_env=(
                 operational_store.get("dsn_env", "LOOP_POSTGRES_DSN").strip()
@@ -242,7 +242,7 @@ class LoopEngineeringSettings:
         values = dict(environment if environment is not None else os.environ)
         secret_mappings = (
             ("GH_TOKEN", self.secrets.github_token_env),
-            ("OPENAI_API_KEY_REVIEWER", self.secrets.reviewer_api_key_env),
+            ("OPENAI_API_KEY", self.secrets.reviewer_api_key_env),
             ("LOOP_POSTGRES_DSN", self.secrets.operational_store_dsn_env),
             ("LOOP_TRUSTED_REVIEWER_SOCKET", self.secrets.trusted_reviewer_socket_env),
         )

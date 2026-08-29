@@ -82,12 +82,27 @@ def test_runtime_environment_maps_secret_values_without_putting_them_in_config(
     )
 
     assert values["GH_TOKEN"] == "github-secret"
-    assert values["OPENAI_API_KEY_REVIEWER"] == "reviewer-secret"
+    assert values["OPENAI_API_KEY"] == "reviewer-secret"
     assert values["LOOP_POSTGRES_DSN"] == "postgresql://secret"
     assert values["LOOP_TRUSTED_REVIEWER_SOCKET"] == "/tmp/reviewer.sock"
     assert values["LOOP_REPOSITORY"] == "owner/product"
     assert values["LOOP_PROJECT_NUMBER"] == "9"
     assert values["LOOP_REVIEWER_MODEL"] == "gpt-5.6-terra"
+
+
+def test_default_reviewer_api_key_environment_is_openai_api_key(tmp_path: Path) -> None:
+    config = tmp_path / "loop-engineering.ini"
+    workspace = tmp_path / "product"
+    _write_config(config, str(workspace))
+    text = config.read_text(encoding="utf-8").replace(
+        "reviewer_api_key_env = MY_REVIEWER_KEY\n",
+        "",
+    )
+    config.write_text(text, encoding="utf-8")
+
+    settings = LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+
+    assert settings.secrets.reviewer_api_key_env == "OPENAI_API_KEY"
 
 
 def test_relative_workspace_path_is_rejected(tmp_path: Path) -> None:

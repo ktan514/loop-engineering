@@ -9,3 +9,4 @@ config/loop-engineering.ini
 build/
 dist/
 *.egg-info/
+*.log

@@ -1,7 +1,7 @@
 # 設定ファイルと秘密情報の境界
 
-管理Issue: #24
-状態: 統合正本
+管理Issue: #31
+状態: standalone設定正本
 
 ## 1. 目的
 
@@ -38,10 +38,10 @@ Workspace pathそのものをCLI引数や環境変数で通常上書きしない
 
 ```ini
 [project]
-key = ai-liver-yura
-workspace_path = /Users/example/workspace/ai-liver-yura
-repository = ktan514/ai-liver-yura
-trunk_branch = rebuild/v2-foundation
+key = sample-product
+workspace_path = /Users/example/workspace/sample-product
+repository = owner/sample-product
+trunk_branch = main
 ```
 
 Loop Engineeringはホームディレクトリを暗黙探索しない。
@@ -63,6 +63,18 @@ Repository名、owner、Project番号、Mission/Root/Parent/Integration Issue、
 
 これらをCoreへハードコードしない。
 
+`loop-engineering`自身を対象にしたstandalone実運転では、現在のAuthorityを次とする。
+
+- Repository: `ktan514/loop-engineering`
+- Project: `loop-engineering` / Project #9
+- Mission: Issue #33
+- Parent: Issue #9
+- 運用Authority: Issue #26
+- 現在のIntegration Work: Issue #27
+- `root_issue`: 未設定
+
+これらの役割を便宜的に同一Issue番号へ統合しない。
+
 ## 5. モデル / API
 
 モデル名、provider種別、API endpoint、timeout等の非秘密設定は設定ファイルへ置く。
@@ -76,10 +88,10 @@ implementer_model = default
 reviewer_provider = openai
 reviewer_model = gpt-5.6-terra
 reviewer_api_base = https://api.openai.com/v1
-reviewer_api_key_env = OPENAI_API_KEY_REVIEWER
+reviewer_api_key_env = OPENAI_API_KEY
 ```
 
-`reviewer_api_key_env`には秘密値ではなく環境変数名だけを書く。
+`reviewer_api_key_env`には秘密値ではなく環境変数名だけを書く。OpenAI API keyの標準環境変数名は`OPENAI_API_KEY`とし、`OPENAI_API_KEY_REVIEWER`は使用しない。
 
 ## 6. 秘密情報
 
@@ -93,15 +105,16 @@ reviewer_api_key_env = OPENAI_API_KEY_REVIEWER
 
 実値は`.env`またはホスト側の秘密情報sourceに置く。
 
-例:
+現時点で必須として確定しているローカル秘密値は次である。
 
-```dotenv
-GH_TOKEN=...
-OPENAI_API_KEY_REVIEWER=...
-LOOP_POSTGRES_DSN=...
+```bash
+export GH_TOKEN="..."
+export OPENAI_API_KEY="..."
 ```
 
-`.env`はGit管理対象外とする。`.env.example`には値を入れず必要な変数名だけを記録する。
+`LOOP_POSTGRES_DSN`と`LOOP_TRUSTED_REVIEWER_SOCKET`は利用契約が未確定のため、ローカル`.env`へ空値や自己参照値を置かない。必要性と値を確定した時点で追加する。
+
+`.env`はGit管理対象外とする。`.env.example`には実値を入れない。
 
 ## 7. Pipenvとの関係
 
@@ -133,7 +146,9 @@ CLI overrideは設定ファイルの選択等の明示的な一時変更に限�
 - Workspace pathは選択された設定ファイルから解決する
 - 秘密情報の実値を設定ファイルへ保存しない
 - 設定ファイルには秘密情報の環境変数名を記録できる
+- OpenAI API keyの標準環境変数名は`OPENAI_API_KEY`とする
 - `.env`をcommitしない
+- 未確定の秘密情報を空値で「設定済み」にしない
 - 設定と実Workspace/Repository identityが不一致ならfail-closed
 - Product固有値をCoreへハードコードしない
 - model/provider変更をCore state machineの変更理由にしない
