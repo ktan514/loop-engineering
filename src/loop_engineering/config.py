@@ -51,9 +51,9 @@ class LoopEngineConfig:
             ("parent_issue", self.parent_issue),
             ("integration_work", self.integration_work),
         )
-        for name, value in optional_issue_fields:
-            if value is not None and value < 1:
-                raise ValueError(f"{name}は1以上である必要があります")
+        for field_name, field_value in optional_issue_fields:
+            if field_value is not None and field_value < 1:
+                raise ValueError(f"{field_name}は1以上である必要があります")
         if any(not item.strip() for item in self.authority_refs):
             raise ValueError("authority_refsに空文字は指定できません")
 
@@ -276,11 +276,11 @@ class LoopEngineeringSettings:
             ("LOOP_PARENT_ISSUE", engine.parent_issue),
             ("LOOP_INTEGRATION_WORK", engine.integration_work),
         )
-        for name, value in optional_runtime_values:
-            if value is None:
-                values.pop(name, None)
+        for runtime_name, runtime_value in optional_runtime_values:
+            if runtime_value is None:
+                values.pop(runtime_name, None)
             else:
-                values[name] = str(value)
+                values[runtime_name] = str(runtime_value)
         return values
 
     def canonical_environment(
