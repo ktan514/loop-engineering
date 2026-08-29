@@ -169,10 +169,31 @@ class FakeRunner:
             return json.dumps(
                 {
                     "fields": [
-                        {"name": "Status", "id": "F_STATUS", "options": [{"name": "Ready", "id": "O_READY"}]},
-                        {"name": "Priority", "id": "F_PRIORITY", "options": [{"name": "P1", "id": "O_P1"}]},
-                        {"name": "Area", "id": "F_AREA", "options": [{"name": "Subsystem/Development Tooling", "id": "O_AREA"}]},
-                        {"name": "Issue level", "id": "F_LEVEL", "options": [{"name": "Work", "id": "O_WORK"}]},
+                        {
+                            "name": "Status",
+                            "id": "F_STATUS",
+                            "options": [{"name": "Ready", "id": "O_READY"}],
+                        },
+                        {
+                            "name": "Priority",
+                            "id": "F_PRIORITY",
+                            "options": [{"name": "P1", "id": "O_P1"}],
+                        },
+                        {
+                            "name": "Area",
+                            "id": "F_AREA",
+                            "options": [
+                                {
+                                    "name": "Subsystem/Development Tooling",
+                                    "id": "O_AREA",
+                                }
+                            ],
+                        },
+                        {
+                            "name": "Issue level",
+                            "id": "F_LEVEL",
+                            "options": [{"name": "Work", "id": "O_WORK"}],
+                        },
                         {"name": "Start date", "id": "F_START"},
                         {"name": "Target date", "id": "F_TARGET"},
                     ]
@@ -250,7 +271,9 @@ class PagedMarkerRunner(FakeRunner):
         command = tuple(args)
         if command[:2] == ("gh", "api"):
             candidate = _candidate()
-            return json.dumps([[], [{"number": 601, "body": marker(candidate.improvement_key)}]])
+            return json.dumps(
+                [[], [{"number": 601, "body": marker(candidate.improvement_key)}]]
+            )
         return super().run(args)
 
 
