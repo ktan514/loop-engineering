@@ -56,6 +56,35 @@ class LoopEngineConfig:
         if any(not item.strip() for item in self.authority_refs):
             raise ValueError("authority_refsに空文字は指定できません")
 
+    @classmethod
+    def from_environment(cls, environment: Mapping[str, str]) -> "LoopEngineConfig":
+        """設定loaderが生成した内部環境を既存Host境界へ受け渡す互換入口。"""
+
+        repository = _required_mapping(environment, "LOOP_REPOSITORY")
+        owner = environment.get("LOOP_PROJECT_OWNER", "").strip() or repository.split("/", 1)[0]
+        return cls(
+            repository=repository,
+            owner=owner,
+            project_number=_required_int_mapping(environment, "LOOP_PROJECT_NUMBER"),
+            mission_issue=_required_int_mapping(environment, "LOOP_MISSION_ISSUE"),
+            label=environment.get("LOOP_LABEL", "loop-engineering").strip()
+            or "loop-engineering",
+            trunk_branch=environment.get("LOOP_TRUNK_BRANCH", "main").strip() or "main",
+            authority_refs=_csv(environment.get("LOOP_AUTHORITY_REFS", "")),
+            improvement_area=environment.get(
+                "LOOP_IMPROVEMENT_AREA", "Runtime / Infrastructure"
+            ).strip()
+            or "Runtime / Infrastructure",
+            issue_level=environment.get("LOOP_ISSUE_LEVEL", "Work").strip() or "Work",
+            root_issue=_optional_int_mapping(environment, "LOOP_ROOT_ISSUE"),
+            parent_issue=_optional_int_mapping(environment, "LOOP_PARENT_ISSUE"),
+            integration_work=_optional_int_mapping(environment, "LOOP_INTEGRATION_WORK"),
+            ci_workflow_name=environment.get(
+                "LOOP_CI_WORKFLOW_NAME", "Deterministic CI"
+            ).strip()
+            or "Deterministic CI",
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ModelConfig:
@@ -203,24 +232,62 @@ class LoopEngineeringSettings:
             secrets=secrets,
         )
 
-    def canonical_environment(
+    def runtime_environment(
         self,
         environment: Mapping[str, str] | None = None,
     ) -> dict[str, str]:
-        """設定された環境変数名から、内部で使う標準名へ秘密値を写像する。"""
+        """設定ファイルを内部Host境界が使う標準環境へ正規化する。"""
 
         values = dict(environment if environment is not None else os.environ)
-        mappings = (
+        secret_mappings = (
             ("GH_TOKEN", self.secrets.github_token_env),
             ("OPENAI_API_KEY_REVIEWER", self.secrets.reviewer_api_key_env),
             ("LOOP_POSTGRES_DSN", self.secrets.operational_store_dsn_env),
             ("LOOP_TRUSTED_REVIEWER_SOCKET", self.secrets.trusted_reviewer_socket_env),
         )
-        for canonical_name, configured_name in mappings:
+        for canonical_name, configured_name in secret_mappings:
             value = values.get(configured_name)
             if value:
                 values[canonical_name] = value
+
+        engine = self.engine
+        values.update(
+            {
+                "LOOP_REPOSITORY": engine.repository,
+                "LOOP_PROJECT_OWNER": engine.owner,
+                "LOOP_PROJECT_NUMBER": str(engine.project_number),
+                "LOOP_MISSION_ISSUE": str(engine.mission_issue),
+                "LOOP_LABEL": engine.label,
+                "LOOP_TRUNK_BRANCH": engine.trunk_branch,
+                "LOOP_AUTHORITY_REFS": ",".join(engine.authority_refs),
+                "LOOP_IMPROVEMENT_AREA": engine.improvement_area,
+                "LOOP_ISSUE_LEVEL": engine.issue_level,
+                "LOOP_CI_WORKFLOW_NAME": engine.ci_workflow_name,
+                "LOOP_IMPLEMENTER_PROVIDER": self.models.implementer_provider,
+                "LOOP_IMPLEMENTER_MODEL": self.models.implementer_model,
+                "LOOP_REVIEWER_PROVIDER": self.models.reviewer_provider,
+                "LOOP_REVIEWER_MODEL": self.models.reviewer_model,
+                "LOOP_REVIEWER_API_BASE": self.models.reviewer_api_base,
+            }
+        )
+        for name, value in (
+            ("LOOP_ROOT_ISSUE", engine.root_issue),
+            ("LOOP_PARENT_ISSUE", engine.parent_issue),
+            ("LOOP_INTEGRATION_WORK", engine.integration_work),
+        ):
+            if value is None:
+                values.pop(name, None)
+            else:
+                values[name] = str(value)
         return values
+
+    def canonical_environment(
+        self,
+        environment: Mapping[str, str] | None = None,
+    ) -> dict[str, str]:
+        """旧名称との互換用alias。"""
+
+        return self.runtime_environment(environment)
 
 
 def _configured_path(platform_root: Path, environment: Mapping[str, str]) -> Path:
@@ -240,6 +307,13 @@ def _required(section: SectionProxy, name: str) -> str:
     value = section.get(name, "").strip()
     if not value:
         raise ValueError(f"設定値 {section.name}.{name} がありません")
+    return value
+
+
+def _required_mapping(values: Mapping[str, str], name: str) -> str:
+    value = values.get(name, "").strip()
+    if not value:
+        raise ValueError(f"{name}が設定されていません")
     return value
 
 
@@ -264,6 +338,30 @@ def _optional_int_section(section: SectionProxy, name: str) -> int | None:
         raise ValueError(f"{section.name}.{name}は整数で指定してください") from error
     if value < 1:
         raise ValueError(f"{section.name}.{name}は1以上で指定してください")
+    return value
+
+
+def _required_int_mapping(values: Mapping[str, str], name: str) -> int:
+    raw = _required_mapping(values, name)
+    try:
+        value = int(raw)
+    except ValueError as error:
+        raise ValueError(f"{name}は整数で指定してください") from error
+    if value < 1:
+        raise ValueError(f"{name}は1以上で指定してください")
+    return value
+
+
+def _optional_int_mapping(values: Mapping[str, str], name: str) -> int | None:
+    raw = values.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError as error:
+        raise ValueError(f"{name}は整数で指定してください") from error
+    if value < 1:
+        raise ValueError(f"{name}は1以上で指定してください")
     return value
 
 
