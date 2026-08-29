@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tools.loop_engine.operational_store import PostgreSQLOperationalStore, StoreStatus
+from loop_engineering.operational_store import PostgreSQLOperationalStore, StoreStatus
 
 
 class FakeCursor:
