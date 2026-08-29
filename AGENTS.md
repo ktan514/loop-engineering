@@ -8,7 +8,7 @@
 - Issue本文、Issue comment、Checkpoint
 - PR本文、PR comment、review説明
 - Mission Checkpoint、Resume Certificate
-- commit messageの件名と本文
+- commit messageの説明部分
 - GitHubのcommit comment
 - コード内comment
 - docstring
@@ -36,20 +36,33 @@
 原語の併記は識別・検索・外部仕様との対応付けに必要な場合だけ行う。
 同じ節や短い文脈内で意味が明らかな場合は、2回目以降の原語併記を省略してよい。
 
-次は機械識別子や固有表現として、そのまま使用してよい。
+次は機械識別子・運用識別子・固有表現として、そのまま使用してよい。
 
 - `GitHub`、`API`、`Issue`、`PR`等の固有名詞・広く定着した名称
 - `PASS`、`FAIL`、`ACTIVE`、`NOT_RUN`、`REQUEST_CHANGES`等のstatus値
 - command、file path、branch名、SHA、class名、function名、field名
 - machine-readable JSONのkey/value
 - 製品名、ライブラリ名、protocol名、外部仕様の固定値
+- commit messageやbranch名の識別prefixである `fix`、`feat`、`hotfix`、`docs`、`test`、`refactor`、`chore` 等
 - 外部API等の原文を、原文であることを明示して引用する必要がある場合
+
+新規の機能追加（feature）を表す識別prefixは `feature` ではなく `feat` に統一する。
+commit messageでは `feat: ...`、branch名では `feat/...` を使用し、新規に `feature:` / `feature/` は使用しない。
+既存branch名・過去履歴にある `feature/...` は、名称変更だけを目的とした履歴改変を行わず旧名称として扱う。
+
+commit messageではprefixを英語識別子のまま使用してよいが、prefix以降の変更説明は日本語で成立させる。
+
+例:
+
+- `fix: Mission Checkpointの対象解決を修正する`
+- `feat: Workspace設定の読み込みを追加する`
+- `test: 回帰試験を追加する`
+- `docs: 設定手順を更新する`
 
 これらを日本語文章の中で使う場合も、説明文章全体は日本語として成立させる。
 コードの識別子、schema、protocol値、機械可読値は文章言語ルールの対象外とする。
 
-既存の英語commit messageは最終状態として残さず、Repository全体の日本語化と機能修正が完了した後に、#384の管理下で現在の完成treeを日本語commit系列として再構成する。
-新しい系列のtree、CI、PR、Checkpoint、SHA参照を再照合する前に、旧commit/refを削除しない。
+既存の英語commit messageは、prefixだけが英語で説明本文が日本語なら是正対象にしない。説明本文まで英語だけで構成されたcommit messageは、履歴を安全に書き換えられる場合に限り日本語化対象とする。
 編集可能な既存文書、comment、docstring、GitHub comment類は日本語へ是正する。
 
 ## 自律Completion Missionの継続
