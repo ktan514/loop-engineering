@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from tools.loop_engine.models import RunDisposition
-from tools.loop_engine.operational_store import PostgreSQLOperationalStore, StoreStatus
-from tools.loop_engine.runner import (
+from loop_engineering.models import RunDisposition
+from loop_engineering.operational_store import PostgreSQLOperationalStore, StoreStatus
+from loop_engineering.runner import (
     ExecutionEvidence,
     ExecutionStatus,
     LoopRunner,
     VerificationEvidence,
 )
-from tools.loop_engine.supervisor import MissionSupervisor
+from loop_engineering.supervisor import MissionSupervisor
 
-from .conftest import epoch
+from .conftest import config, epoch
 
 
 class Observer:
@@ -66,7 +66,7 @@ def test_runner_executes_one_transition_checkpoints_and_selects_next_work() -> N
     checkpoints = Checkpoints()
     result = LoopRunner(
         observer,
-        MissionSupervisor(),
+        MissionSupervisor(config()),
         Executor(),
         Verifier(),
         checkpoints,
@@ -90,7 +90,7 @@ def test_runner_rejects_verification_for_a_different_execution_head() -> None:
     checkpoints = Checkpoints()
     result = LoopRunner(
         observer,
-        MissionSupervisor(),
+        MissionSupervisor(config()),
         Executor(),
         MismatchedVerifier(),
         checkpoints,
@@ -114,7 +114,7 @@ def test_runner_rejects_verification_when_execution_head_is_missing() -> None:
     checkpoints = Checkpoints()
     result = LoopRunner(
         observer,
-        MissionSupervisor(),
+        MissionSupervisor(config()),
         MissingHeadExecutor(),
         Verifier(),
         checkpoints,
@@ -134,7 +134,11 @@ def test_runner_yields_without_executor_for_wait_only_decision() -> None:
             return replace(current, works=(waiting,))
 
     result = LoopRunner(
-        WaitingObserver(), MissionSupervisor(), Executor(), Verifier(), Checkpoints()
+        WaitingObserver(),
+        MissionSupervisor(config()),
+        Executor(),
+        Verifier(),
+        Checkpoints(),
     ).run_once()
 
     assert result.disposition is RunDisposition.YIELD_EXTERNAL
