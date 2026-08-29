@@ -105,6 +105,18 @@ def test_default_reviewer_api_key_environment_is_openai_api_key(tmp_path: Path) 
     assert settings.secrets.reviewer_api_key_env == "OPENAI_API_KEY"
 
 
+def test_python_source_does_not_load_dotenv_directly() -> None:
+    root = Path(__file__).resolve().parents[1]
+    source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (root / "src" / "loop_engineering").rglob("*.py")
+    )
+
+    assert "load_dotenv" not in source
+    assert "dotenv_values" not in source
+    assert "python-dotenv" not in source
+
+
 def test_relative_workspace_path_is_rejected(tmp_path: Path) -> None:
     config = tmp_path / "loop-engineering.ini"
     _write_config(config, "relative/product")
