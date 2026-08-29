@@ -223,7 +223,7 @@ def test_canonical_serialization_rejects_unordered_or_unknown_values() -> None:
     with pytest.raises(TypeError, match="順序を持たないcollection"):
         canonical_json({"a", "b"})
 
-    with pytest.raises(TypeError, match="unsupported"):
+    with pytest.raises(TypeError, match="未対応の正規直列化型"):
         canonical_json(object())
 
 
