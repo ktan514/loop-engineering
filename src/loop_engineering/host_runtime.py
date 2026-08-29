@@ -300,7 +300,7 @@ class GhMissionPort:
         comments = self._issue_comments(self.config.mission_issue)
         for comment in reversed(comments):
             body = _string(comment.get("body"))
-            if "Mission Checkpoint" not in body:
+            if body is None or "Mission Checkpoint" not in body:
                 continue
             work_match = _CURRENT_WORK_RE.search(body)
             if work_match is None:
