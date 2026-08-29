@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 import time
 from pathlib import Path
 
+from .config import LoopEngineeringSettings
 from .host_runtime import HostTransitionResult, HostTransitionStatus
 from .runtime_console import RuntimeConsole, VisibleSubprocessLocalRunner
 
@@ -19,6 +21,10 @@ def main() -> int:
         "--validate-installation",
         action="store_true",
         help="外部システムを観測・変更せずに制御系パッケージの導入状態を確認する。",
+    )
+    parser.add_argument(
+        "--config",
+        help="既定のconfig/loop-engineering.ini以外を使用する場合の設定ファイルpath。",
     )
     parser.add_argument(
         "--once",
@@ -40,12 +46,27 @@ def main() -> int:
 
     from .host_entrypoint import run_actual_host_transition
 
-    root = Path(__file__).resolve().parents[2]
-    console = RuntimeConsole(root, verbose=arguments.verbose)
+    platform_root = Path(__file__).resolve().parents[2]
+    selected_config = Path(arguments.config) if arguments.config else None
+    try:
+        settings = LoopEngineeringSettings.load(
+            platform_root,
+            os.environ,
+            config_path=selected_config,
+        )
+    except ValueError as error:
+        print(f"CONFIGURATION_INVALID: {error}")
+        return 3
+
+    environment = settings.runtime_environment(os.environ)
+    workspace_root = settings.workspace_path
+    console = RuntimeConsole(platform_root, verbose=arguments.verbose)
     runner = VisibleSubprocessLocalRunner(console)
     mode = "once" if arguments.once else "continuous"
     mode_label = "1回実行" if arguments.once else "継続実行"
-    console.event(f"開始 mode={mode}（{mode_label}）")
+    console.event(f"開始 mode={mode}（{mode_label}） project={settings.project_key}")
+    console.event(f"設定: {settings.config_path}")
+    console.event(f"対象Workspace: {workspace_root}")
     console.event(f"ログ: {console.path}")
 
     ci_wait_seconds = _CI_RECHECK_INITIAL_SECONDS
@@ -57,7 +78,12 @@ def main() -> int:
         while True:
             transition_number += 1
             console.event(f"遷移 {transition_number}: 開始")
-            result = run_actual_host_transition(root=root, local_runner=runner)
+            result = run_actual_host_transition(
+                root=workspace_root,
+                environment=environment,
+                local_runner=runner,
+                config=settings.engine,
+            )
             console.event(
                 f"遷移 {transition_number}: "
                 f"{result.status.value} 詳細={result.detail}"
