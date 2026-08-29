@@ -4,8 +4,10 @@ import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from tools.loop_engine.host_runtime import HostTarget, LocalCommandResult
-from tools.loop_engine.trusted_worktree import TrustedWorktree
+from loop_engineering.host_runtime import HostTarget, LocalCommandResult
+from loop_engineering.trusted_worktree import PreparedWorktree, TrustedWorktree
+
+from .conftest import config
 
 
 class ScriptedRunner:
@@ -41,23 +43,16 @@ def test_existing_pr_is_prepared_without_codex_git_write() -> None:
     runner = ScriptedRunner(
         {
             ("git", "status", "--porcelain"): LocalCommandResult(0, ""),
-            (
-                "gh",
-                "api",
-                "repos/ktan514/ai-liver-yura/pulls/500",
-            ): LocalCommandResult(0, json.dumps(pull)),
+            ("gh", "api", "repos/ktan514/ai-liver-yura/pulls/500"): LocalCommandResult(
+                0, json.dumps(pull)
+            ),
             ("git", "fetch", "origin", "feature/work"): LocalCommandResult(0, ""),
             ("git", "switch", "feature/work"): LocalCommandResult(0, ""),
-            (
-                "git",
-                "merge",
-                "--ff-only",
-                "origin/feature/work",
-            ): LocalCommandResult(0, ""),
+            ("git", "merge", "--ff-only", "origin/feature/work"): LocalCommandResult(0, ""),
             ("git", "rev-parse", "HEAD"): LocalCommandResult(0, head + "\n"),
         }
     )
-    worktree = TrustedWorktree(runner, Path("/repo"), {"PATH": "/usr/bin"})
+    worktree = TrustedWorktree(config(), runner, Path("/repo"), {"PATH": "/usr/bin"})
     target = HostTarget(340, True, 500, head, True, False, 1, head)
 
     prepared = worktree.prepare(target)
@@ -79,26 +74,14 @@ def test_dirty_pr_starts_normal_trunk_merge_on_trusted_host() -> None:
     runner = ScriptedRunner(
         {
             ("git", "status", "--porcelain"): LocalCommandResult(0, ""),
-            (
-                "gh",
-                "api",
-                "repos/ktan514/ai-liver-yura/pulls/500",
-            ): LocalCommandResult(0, json.dumps(pull)),
+            ("gh", "api", "repos/ktan514/ai-liver-yura/pulls/500"): LocalCommandResult(
+                0, json.dumps(pull)
+            ),
             ("git", "fetch", "origin", "feature/work"): LocalCommandResult(0, ""),
             ("git", "switch", "feature/work"): LocalCommandResult(0, ""),
-            (
-                "git",
-                "merge",
-                "--ff-only",
-                "origin/feature/work",
-            ): LocalCommandResult(0, ""),
+            ("git", "merge", "--ff-only", "origin/feature/work"): LocalCommandResult(0, ""),
             ("git", "rev-parse", "HEAD"): LocalCommandResult(0, head + "\n"),
-            (
-                "git",
-                "fetch",
-                "origin",
-                "rebuild/v2-foundation",
-            ): LocalCommandResult(0, ""),
+            ("git", "fetch", "origin", "rebuild/v2-foundation"): LocalCommandResult(0, ""),
             (
                 "git",
                 "merge",
@@ -106,15 +89,12 @@ def test_dirty_pr_starts_normal_trunk_merge_on_trusted_host() -> None:
                 "--no-ff",
                 "origin/rebuild/v2-foundation",
             ): LocalCommandResult(1, "競合"),
-            (
-                "git",
-                "diff",
-                "--name-only",
-                "--diff-filter=U",
-            ): LocalCommandResult(0, "docs/a.md\n"),
+            ("git", "diff", "--name-only", "--diff-filter=U"): LocalCommandResult(
+                0, "docs/a.md\n"
+            ),
         }
     )
-    worktree = TrustedWorktree(runner, Path("/repo"), {"PATH": "/usr/bin"})
+    worktree = TrustedWorktree(config(), runner, Path("/repo"), {"PATH": "/usr/bin"})
     target = HostTarget(340, True, 500, head, True, False, 1, head)
 
     prepared = worktree.prepare(target)
@@ -135,29 +115,13 @@ def test_finalize_commits_pushes_and_publishes_checkpoint_in_japanese() -> None:
     new_head = "d" * 40
     runner = ScriptedRunner(
         {
-            (
-                "git",
-                "diff",
-                "--name-only",
-                "--diff-filter=U",
-            ): LocalCommandResult(0, ""),
+            ("git", "diff", "--name-only", "--diff-filter=U"): LocalCommandResult(0, ""),
             ("git", "diff", "--check"): LocalCommandResult(0, ""),
             ("git", "add", "-A"): LocalCommandResult(0, ""),
             ("git", "diff", "--cached", "--quiet"): LocalCommandResult(1, ""),
-            (
-                "git",
-                "commit",
-                "-m",
-                "#340 の実装を進める",
-            ): LocalCommandResult(0, ""),
+            ("git", "commit", "-m", "#340 の実装を進める"): LocalCommandResult(0, ""),
             ("git", "rev-parse", "HEAD"): LocalCommandResult(0, new_head + "\n"),
-            (
-                "git",
-                "push",
-                "-u",
-                "origin",
-                "HEAD:feature/work",
-            ): LocalCommandResult(0, ""),
+            ("git", "push", "-u", "origin", "HEAD:feature/work"): LocalCommandResult(0, ""),
             (
                 "gh",
                 "api",
@@ -171,16 +135,14 @@ def test_finalize_commits_pushes_and_publishes_checkpoint_in_japanese() -> None:
                     "- current branch: `feature/work`\n"
                     f"- exact HEAD: `{new_head}`\n"
                     "- 完了済み: Codexによるファイル編集と検証後、"
-                    "信頼済みホストがコミット（commit）と送信（push）を実施\n"
-                    "- next action: exact HEADのCIを確認し、結果に応じて継続する"
+                    "信頼済みホストがcommitとpushを実施\n"
+                    "- next action: 厳密HEADのCIを確認し、結果に応じて継続する"
                 ),
             ): LocalCommandResult(0, ""),
         }
     )
-    worktree = TrustedWorktree(runner, Path("/repo"), {"PATH": "/usr/bin"})
+    worktree = TrustedWorktree(config(), runner, Path("/repo"), {"PATH": "/usr/bin"})
     target = HostTarget(340, True, 500, old_head, True, False, 1, old_head)
-
-    from tools.loop_engine.trusted_worktree import PreparedWorktree
 
     result = worktree.finalize(
         target,
