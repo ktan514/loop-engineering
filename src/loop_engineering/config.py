@@ -46,11 +46,12 @@ class LoopEngineConfig:
             raise ValueError("project_numberは1以上である必要があります")
         if self.mission_issue < 1:
             raise ValueError("mission_issueは1以上である必要があります")
-        for name, value in (
+        optional_issue_fields: tuple[tuple[str, int | None], ...] = (
             ("root_issue", self.root_issue),
             ("parent_issue", self.parent_issue),
             ("integration_work", self.integration_work),
-        ):
+        )
+        for name, value in optional_issue_fields:
             if value is not None and value < 1:
                 raise ValueError(f"{name}は1以上である必要があります")
         if any(not item.strip() for item in self.authority_refs):
@@ -270,11 +271,12 @@ class LoopEngineeringSettings:
                 "LOOP_REVIEWER_API_BASE": self.models.reviewer_api_base,
             }
         )
-        for name, value in (
+        optional_runtime_values: tuple[tuple[str, int | None], ...] = (
             ("LOOP_ROOT_ISSUE", engine.root_issue),
             ("LOOP_PARENT_ISSUE", engine.parent_issue),
             ("LOOP_INTEGRATION_WORK", engine.integration_work),
-        ):
+        )
+        for name, value in optional_runtime_values:
             if value is None:
                 values.pop(name, None)
             else:
