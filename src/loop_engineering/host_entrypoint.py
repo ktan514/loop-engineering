@@ -255,7 +255,8 @@ class PilotPlanningImplementer(CodexImplementer):
             "active PRが存在する場合は`- current PR: #<pr>`と"
             "`- exact HEAD: <40-hex-sha>`も記録してください。"
             "active PRが無い場合はPR/HEADを捏造せず省略してください。"
-            f"Mission Issue #{self._config.mission_issue}へ日本語のMission Checkpointを1回だけ記録してください。"
+            f"Mission Issue #{self._config.mission_issue}へ日本語のMission Checkpointを"
+            "1回だけ記録してください。"
             "Mission完了をlive evidenceで証明できない限り`MISSION_COMPLETE`にしないでください。"
         )
         return self._run_codex(instruction)
