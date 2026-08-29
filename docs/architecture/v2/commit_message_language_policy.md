@@ -22,14 +22,7 @@
 - `refactor: 実装正本をsrc packageへ統一する`
 - `chore: 開発補助設定を整理する`
 
-機能追加を表すprefixは **`feature` ではなく `feat` に統一**する。
-
-新規に次は使用しない。
-
-- `feature: ...`
-- `feature/...` を新しいbranch prefixとして使用すること
-
-既存branchや過去履歴の `feature/...` は、名称変更だけを理由に履歴を書き換えず旧名称として扱う。
+機能追加のcommit prefixは **`feat:`** に統一する。`feature:` はcommit prefixとして使用しない。
 
 ## 2. 件名
 
@@ -43,7 +36,7 @@
 
 ## 3. 許可する識別prefix
 
-通常使用するprefix:
+通常使用するcommit prefix:
 
 - `feat:` 機能追加
 - `fix:` 不具合修正
@@ -66,17 +59,24 @@ breaking changeを示す `!` も機械識別として使用できるが、説明
 
 ## 4. branch prefix
 
-新規branchの機能追加系prefixは `feat/` に統一する。
+`ai-liver-yura`のbranch運用に準拠し、機能追加系branchは **`feature/`** を使用する。
 
 例:
 
-- `feat/workspace-config`
+- `feature/workspace-config`
 - `fix/checkpoint-resolution`
 - `docs/runtime-guide`
 - `test/host-runtime-regression`
 - `refactor/package-boundary`
 
-`feature/` は新規branchでは使用しない。
+`feat/` はbranch prefixとして使用しない。
+
+したがって機能追加では次の対応になる。
+
+```text
+branch: feature/workspace-config
+commit: feat: Workspace設定の読み込みを追加する
+```
 
 ## 5. 本文
 
@@ -91,7 +91,8 @@ breaking changeを示す `!` も機械識別として使用できるが、説明
 - SHA
 - テストツール名
 - GitHub Status名などの技術識別子
-- `feat` / `fix` 等の運用識別prefix
+- `feat:` / `fix:` 等の運用識別prefix
+- `feature/` 等のbranch prefix
 
 ## 6. Merge commit
 
@@ -105,12 +106,13 @@ Commit Hygiene Guardを実装する場合は少なくとも次を拒否する。
 
 - prefix以降の説明が英語だけのcommit
 - placeholder / no-op / trigger-onlyコミット
-- 新規の `feature:` prefix
+- commit prefixとしての `feature:`
+- branch prefixとしての `feat/`
 
-`feat:` / `fix:` 等のASCII prefix自体は拒否しない。
+`feat:` / `fix:` 等のASCII commit prefix自体は拒否しない。
 
 ## 8. 既存履歴
 
-既存の `feature/...` branch、既存の英語prefix、共有済みSHAは、名称統一だけを理由にforce rewriteしない。
+既存branch名、既存の英語prefix、共有済みSHAは、名称統一だけを理由にforce rewriteしない。
 
 説明本文まで英語のみで、かつ安全に修正可能な未共有履歴を整理する場合は日本語化してよい。共有済み履歴を書き換える場合は、影響するbranch、PR、Checkpoint、SHA参照を列挙した専用の再調整手順を必要とする。
