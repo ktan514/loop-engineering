@@ -1,15 +1,15 @@
-from tools.loop_engine.ci_gate import (
+from loop_engineering.ci_gate import (
     CIGateStatus,
     CIObservation,
 )
-from tools.loop_engine.ci_gate import (
+from loop_engineering.ci_gate import (
     evaluate_exact_head as ci_gate,
 )
-from tools.loop_engine.review_gate import (
+from loop_engineering.review_gate import (
     ReviewEvidence,
     ReviewGateStatus,
 )
-from tools.loop_engine.review_gate import (
+from loop_engineering.review_gate import (
     evaluate_exact_head as review_gate,
 )
 
