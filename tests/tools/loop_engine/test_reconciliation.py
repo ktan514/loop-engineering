@@ -1,24 +1,28 @@
-from tools.loop_engine.models import (
+from loop_engineering.models import (
     CanonicalDesignSnapshot,
     ConflictKind,
     LineageClassification,
     LineageSnapshot,
     MissionSnapshot,
 )
-from tools.loop_engine.reconciliation import reconcile
+from loop_engineering.reconciliation import reconcile
 
-from .conftest import epoch, identity, lineage
+from .conftest import config, epoch, identity, lineage
 
 
 def test_live_checkpoint_consistency_has_no_conflicts() -> None:
-    assert reconcile(epoch()) == ()
+    assert reconcile(epoch(), config()) == ()
 
 
 def test_stale_mission_checkpoint_and_project_unavailable_fail_closed() -> None:
     stale = epoch(mission=MissionSnapshot(identity("issue", "450"), 465, True))
-    assert ConflictKind.MISSION_CHECKPOINT_STALE in reconcile(stale)
-    assert ConflictKind.PROJECT_AUTHORITY_UNAVAILABLE in reconcile(epoch(project_available=False))
-    assert ConflictKind.FORBIDDEN_PROJECT_IDENTITY in reconcile(epoch(project_number=6))
+    assert ConflictKind.MISSION_CHECKPOINT_STALE in reconcile(stale, config())
+    assert ConflictKind.PROJECT_AUTHORITY_UNAVAILABLE in reconcile(
+        epoch(project_available=False), config()
+    )
+    assert ConflictKind.FORBIDDEN_PROJECT_IDENTITY in reconcile(
+        epoch(project_number=6), config()
+    )
 
 
 def test_multiple_and_unknown_lineages_fail_closed() -> None:
@@ -40,13 +44,15 @@ def test_multiple_and_unknown_lineages_fail_closed() -> None:
         "base-1",
         "head-1",
     )
-    conflicts = reconcile(epoch(lineages=(lineage(), multiple, unknown)))
+    conflicts = reconcile(epoch(lineages=(lineage(), multiple, unknown)), config())
     assert ConflictKind.MULTIPLE_ACTIVE_LINEAGES in conflicts
     assert ConflictKind.UNKNOWN_LINEAGE in conflicts
 
 
 def test_design_blob_and_unexplained_head_mismatch_fail_closed() -> None:
-    design = CanonicalDesignSnapshot(identity("blob", "design"), "design.md", "old", "new", 465)
+    design = CanonicalDesignSnapshot(
+        identity("blob", "design"), "design.md", "old", "new", 465
+    )
     changed = LineageSnapshot(
         identity("branch", "feature/supervisor"),
         465,
@@ -61,7 +67,9 @@ def test_design_blob_and_unexplained_head_mismatch_fail_closed() -> None:
         "head-1",
         False,
     )
-    conflicts = reconcile(epoch(canonical_designs=(design,), lineages=(changed,)))
+    conflicts = reconcile(
+        epoch(canonical_designs=(design,), lineages=(changed,)), config()
+    )
     assert ConflictKind.CANONICAL_DESIGN_MISMATCH in conflicts
     assert ConflictKind.UNEXPLAINED_SHA_CHANGE in conflicts
 
@@ -80,7 +88,7 @@ def test_base_checkpoint_ci_and_review_mismatches_fail_closed() -> None:
         "ci-old",
         "review-old",
     )
-    conflicts = reconcile(epoch(lineages=(inconsistent,)))
+    conflicts = reconcile(epoch(lineages=(inconsistent,)), config())
     assert ConflictKind.BASE_SHA_MISMATCH in conflicts
     assert ConflictKind.HEAD_SHA_MISMATCH in conflicts
     assert ConflictKind.CI_HEAD_MISMATCH in conflicts
