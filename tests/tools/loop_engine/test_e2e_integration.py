@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from tools.loop_engine.integration import run_controlled_transition
-from tools.loop_engine.models import RunDisposition
-from tools.loop_engine.operational_store import PostgreSQLOperationalStore, StoreStatus
-from tools.loop_engine.runner import (
+from loop_engineering.integration import run_controlled_transition
+from loop_engineering.models import RunDisposition
+from loop_engineering.operational_store import PostgreSQLOperationalStore, StoreStatus
+from loop_engineering.runner import (
     ExecutionEvidence,
     ExecutionStatus,
     LoopRunner,
     VerificationEvidence,
 )
-from tools.loop_engine.supervisor import MissionSupervisor
+from loop_engineering.supervisor import MissionSupervisor
 
-from .conftest import epoch
+from .conftest import config, epoch
 
 
 class ScenarioObserver:
@@ -85,7 +85,7 @@ def test_e2e_observe_select_execute_verify_checkpoint_store_and_next_selection()
     connection = Connection()
     runner = LoopRunner(
         observer,
-        MissionSupervisor(),
+        MissionSupervisor(config()),
         executor,
         ScenarioVerifier(),
         checkpoints,
@@ -106,7 +106,7 @@ def test_e2e_db_outage_keeps_github_checkpoint_path_safe() -> None:
     checkpoints = ScenarioCheckpoints()
     runner = LoopRunner(
         ScenarioObserver(),
-        MissionSupervisor(),
+        MissionSupervisor(config()),
         ScenarioExecutor(),
         ScenarioVerifier(),
         checkpoints,
