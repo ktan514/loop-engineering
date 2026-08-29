@@ -1,7 +1,7 @@
 # Project Profile Contract
 
 Owner: Issue #2
-Status: Initial canonical architecture draft
+Status: canonical architecture
 
 ## 1. Purpose
 
@@ -35,26 +35,29 @@ feature/PR branch上のProfile変更を、そのPR自身のReview/Write policy�
 
 Profile自身に「どのrepository/ref/pathのProfileを信頼するか」を決めさせてはならない。そうするとuntrusted Profileが自分自身のtrust anchorを変更できる循環になる。
 
-最初のtrust anchorはHost側のProject Registrationが所有する。
+最初のtrust anchorはHost側のProject Registrationが所有する。現在の実装では`config/loop-engineering.ini`が1 Project分のHost Project Registrationを兼ねる。
 
 ```text
 ProjectRegistration
 - project_identity
+- workspace_path
 - profile_repository_identity
 - profile_source_kind
 - trusted_profile_ref
 - trusted_profile_path
+- target_repository_identity
+- planning identity
 - registration_revision
 ```
 
 解決順序:
 
 ```text
-Host ProjectRegistration
-→ trusted profile repository/ref/path
+Host設定ファイル / ProjectRegistration
+→ Workspace path / trusted profile repository/ref/path
+→ Workspaceとtarget repository identityをfresh検証
 → fetch Project Profile
 → schema/policy validation
-→ resolve target repository from Profile
 → ProjectProfileSnapshot
 ```
 
@@ -62,17 +65,17 @@ Host ProjectRegistration
 
 典型構成ではProduct repository自身にProfileを置けるが、将来central profile repositoryを使用する構成も許容する。
 
-Project Profile内で`canonical_branch`等を指定することはできるが、それはProductのsource/design canonicalを表す値であり、**Profile自身を取得するtrust anchorとは別物**とする。
+Project Profile内で`canonical_branch`等を指定することはできるが、それはProductのsource/design canonicalを表す値であり、Profile自身を取得するtrust anchorとは別物とする。
 
-Profile変更PRが`trusted_profile_ref`や`trusted_profile_path`を変更しようとしても、その変更を自己適用しない。trust anchor変更はHost registrationの明示更新として扱い、必要に応じてHuman/Policy Gateを要求する。
+Profile変更PRがtrust anchorを変更しようとしても、その変更を自己適用しない。trust anchor変更はHost設定またはProject Registrationの明示更新として扱い、必要に応じてHuman/Policy Gateを要求する。
 
 ### 2.2 Target repository binding
 
-Profileが指定したtarget repositoryはRun開始時にstable provider identityへ解決する。
+Host設定が指定したtarget repositoryはRun開始時にstable provider identityへ解決する。
 
 表示名/URL文字列だけでexecution targetを確定しない。
 
-Host registrationが特定target repositoryを制約している場合、Profileのtarget repositoryと不一致ならconfiguration conflictとしてfail-closedする。
+設定ファイルの`workspace_path`で観測したremote repository identityと、設定されたtarget repositoryが不一致ならconfiguration conflictとしてfail-closedする。
 
 ## 3. Configuration precedence
 
@@ -83,7 +86,7 @@ Host registrationが特定target repositoryを制約している場合、Profile
 ```text
 Host Safety Policy        highest
 Platform Mandatory Policy
-Project Profile
+Host設定 / Project Profile
 Run Invocation Override   lowest, bounded only
 ```
 
@@ -92,63 +95,55 @@ Run Invocation Override   lowest, bounded only
 - HostがReviewer credential isolationを必須化している場合、Product Profileから無効化不可
 - Hostがforce-push禁止の場合、Run optionで許可不可
 - Project Profileでtest commandやcanonical branchを指定することは可能
+- Run Invocation Overrideで秘密情報をCLI引数として渡さない
 
-## 4. Proposed schema
+## 4. Host設定schema
 
-初期案:
+現在のHost設定はINI形式を使用する。
 
-```yaml
-schema_version: 1
+```ini
+[project]
+key = ai-liver-yura
+workspace_path = /absolute/path/to/ai-liver-yura
+repository = ktan514/ai-liver-yura
+trunk_branch = rebuild/v2-foundation
+project_owner = ktan514
+project_number = 7
+mission_issue = 450
 
-project:
-  key: ai-liver-yura
+[models]
+implementer_provider = codex
+implementer_model = default
+reviewer_provider = openai
+reviewer_model = gpt-5.6-terra
+reviewer_api_base = https://api.openai.com/v1
+reviewer_api_key_env = OPENAI_API_KEY_REVIEWER
 
-source_control:
-  adapter: github
-  repository: ktan514/ai-liver-yura
-  canonical_branch: rebuild/v2-foundation
+[credentials]
+github_token_env = GH_TOKEN
 
-planning:
-  adapter: github-projects
-  project_owner: ktan514
-  project_number: 7
-
-work:
-  mapping: github-issues
-
-ci:
-  adapter: github-actions
-  required_checks:
-    - deterministic-ci
-
-implementer:
-  adapter: codex
-
-reviewer:
-  adapter: trusted-reviewer
-  exact_target_required: true
-
-canonical_design:
-  discovery:
-    strategy: issue-references
-
-verification:
-  human_statuses:
-    - Verification
+[operational_store]
+dsn_env = LOOP_POSTGRES_DSN
 ```
 
-これはillustrative schemaであり、#3/#4の設計でtyped contractを確定する。
+Workspace path、Repository、Planning、モデル名、API endpoint等は非秘密設定として保持する。
+
+API key、token、database credential等は値を直接保持せず、環境変数名だけを設定へ記録する。実値はGit管理外の`.env`またはHost secret sourceから供給する。
 
 ## 5. Allowed profile responsibilities
 
-Profileで指定してよいもの:
+Profile/Host設定で指定してよいもの:
 
 - provider adapter selection
 - target repository identity mapping
+- Workspace path
 - canonical branch/ref
 - planning provider/project mapping
 - WorkItem mapping strategy
 - CI workflow/check requirements
+- implementer/reviewer model
+- API endpoint
+- 秘密情報を参照する環境変数名
 - canonical design discovery strategy
 - product-specific status/priority mappings
 - verification policy mapping
@@ -157,19 +152,19 @@ Profileで指定してよいもの:
 
 ## 6. Forbidden profile responsibilities
 
-Profileへ置かないもの:
+Profile/Host設定へ直接置かないもの:
 
 - access token
 - API key
 - private key
-- database credential
-- reviewer credential
+- database credentialの実値
+- reviewer credentialの実値
 - arbitrary executable shell injected into trusted host without policy validation
 - Host policyを弱めるoverride
 - live current HEAD / current PRを永続的truthとして固定する値
 - Profile自身のbootstrap trust anchorを自己承認する値
 
-secretはhost credential providerからruntime injectionする。
+secretは`.env`またはhost credential providerからruntime injectionする。
 
 ## 7. Command descriptors
 
@@ -195,13 +190,13 @@ shell interpolationを必要とする場合は明示的なhigh-risk capability�
 標準解決フロー:
 
 ```text
-ProjectIdentity
-→ Host ProjectRegistration resolve
-→ trusted profile repository/ref/path resolve
+Host設定ファイル
+→ ProjectIdentity / Workspace path / RepositoryIdentity resolve
+→ Workspace Git root / remote / ref / head / dirty state検証
+→ trusted profile source resolve
 → fetch profile blob
 → schema validate
 → mandatory policy merge
-→ target repository stable identity resolve
 → normalized snapshot
 → digest
 → ObservationEpochへbind
@@ -211,30 +206,26 @@ mutation途中でProfileが更新された場合、そのRunで黙って新旧�
 
 ## 9. Missing profile
 
-Profileは必須とは限らない。
+Product repository内Profileは必須とは限らない。
 
-- explicit CLI/host registrationから同等情報を供給可能
-- provider defaultsで安全に一意化できる場合はminimal profile可
-- 不足情報を推測して危険mutationへ進まない
+Host設定ファイルから同等情報を供給可能で、安全に一意化できる場合はminimal profileでよい。不足情報を推測して危険mutationへ進まない。
 
 必須field不足時はtyped capability/configuration blockerとする。
 
 ## 10. Product-specific policy adapter
 
-ゆら固有のResumeルールやProject field mappingはCoreへ直接埋めず、Profile + policy adapterで表現する。
-
-例:
+Product固有のResumeルールやProject field mappingはCoreへ直接埋めず、Host設定 / Profile + policy adapterで表現する。
 
 ```text
 Generic WorkItem.status
         ↑ mapping
-Yura GitHub Project Status
+Product GitHub Project Status
 ```
 
 ```text
 Generic CanonicalDesignRef
         ↑ mapping
-Yura Issue body Canonical section
+Product Issue body Canonical section
 ```
 
 このmappingにより、別Productは異なるIssue/Project運用を採用できる。
@@ -244,8 +235,9 @@ Yura Issue body Canonical section
 - PR branch自身にControl Plane policyを自己変更させない
 - Profile自身にbootstrap trust anchorを自己変更させない
 - profile repositoryとtarget Product repositoryを同一概念にしない
+- Workspace pathをHost設定へ明示する
 - target repositoryはstable provider identityへresolveする
-- secretsをProfileへ保存しない
+- secretsの実値をProfile/設定へ保存しない
 - Host safety policyをProductから緩和不可
 - schema versionを明示する
 - Profile snapshotをexact source identityへbindする
