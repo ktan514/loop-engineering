@@ -26,7 +26,9 @@ config/loop-engineering.example.ini
 .env.example
 ```
 
-設定ファイルを別場所に置く場合は非秘密の環境変数`LOOP_CONFIG_FILE`で明示できる。
+設定ファイルを別場所に置く場合は、CLIの`--config <path>`または非秘密の環境変数`LOOP_CONFIG_FILE`で設定ファイル自体を選択できる。
+
+Workspace pathそのものをCLI引数や環境変数で通常上書きしない。Workspace pathのAuthorityは選択された設定ファイルとする。
 
 ## 3. Workspace
 
@@ -124,11 +126,11 @@ Host Safety Policy
 → bounded CLI override
 ```
 
-CLI overrideはWorkspace等の明示的な一時変更に限定し、token/API keyをCLI引数へ渡す方式は採用しない。
+CLI overrideは設定ファイルの選択等の明示的な一時変更に限定する。Workspace pathやtoken/API keyをCLI引数へ直接渡す方式は採用しない。
 
 ## 9. Hard invariants
 
-- Workspace pathは設定ファイルまたは明示CLI指定からのみ解決する
+- Workspace pathは選択された設定ファイルから解決する
 - 秘密情報の実値を設定ファイルへ保存しない
 - 設定ファイルには秘密情報の環境変数名を記録できる
 - `.env`をcommitしない
