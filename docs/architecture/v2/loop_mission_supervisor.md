@@ -1,9 +1,9 @@
 # Loop Mission監督 / Work選択器
 
-所有Issue: #465  
-親Issue: #462  
-Root: #317  
-Mission: #450  
+所有Issue: #465
+親Issue: #462
+Root: #317
+Mission: #450
 状態: 正本設計 / 実装契約
 
 ## 1. 目的
