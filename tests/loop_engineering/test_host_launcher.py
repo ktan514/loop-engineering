@@ -39,7 +39,7 @@ def test_launcher_injects_goal_identity_and_path_without_persisting_token(
 
 def test_environment_credentials_are_injected_and_dotenv_is_git_ignored() -> None:
     provider = EnvironmentSecretProvider({"GH_TOKEN": "github-token"})
-    repository_root = Path(__file__).resolve().parents[3]
+    repository_root = Path(__file__).resolve().parents[2]
 
     assert provider.github_token() == "github-token"
     ignored = (repository_root / ".gitignore").read_text(encoding="utf-8").splitlines()
@@ -58,17 +58,17 @@ def test_missing_github_environment_key_is_typed_unavailable() -> None:
 
 
 def test_target_checkout_operations_do_not_reference_reviewer_credentials_or_client() -> None:
-    repository_root = Path(__file__).resolve().parents[3]
+    repository_root = Path(__file__).resolve().parents[2]
     package = repository_root / "src" / "loop_engineering"
     operation_paths = (
         package / "host_launcher.py",
         package / "host_entrypoint.py",
         package / "host_runtime.py",
         package / "trusted_worktree.py",
-        repository_root / "scripts" / "launch-codex-v2.py",
+        repository_root / "scripts" / "launch-loop-engineering.py",
     )
     source = "\n".join(path.read_text(encoding="utf-8") for path in operation_paths)
 
-    assert "OPENAI_API_KEY_REVIEWER" not in source
+    assert "OPENAI_API_KEY" not in source
     assert "from openai" not in source
     assert "import openai" not in source
