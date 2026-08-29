@@ -1,5 +1,3 @@
-"""決定的なLoop Engineering判断を行う開発支援パッケージ。"""
+"""旧`tools.loop_engine`互換入口。実装正本は`loop_engineering`。"""
 
-from .supervisor import MissionSupervisor
-
-__all__ = ["MissionSupervisor"]
+from loop_engineering import *  # noqa: F401,F403
