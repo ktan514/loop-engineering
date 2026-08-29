@@ -2,12 +2,12 @@ import json
 
 import pytest
 
-from tools.loop_engine.health_state import (
+from loop_engineering.health_state import (
     canonicalize_event,
     decode_health_state,
     encode_health_state,
 )
-from tools.loop_engine.models import LoopHealthEvent, LoopHealthKind
+from loop_engineering.models import LoopHealthEvent, LoopHealthKind
 
 
 def test_health_state_round_trip_is_restart_safe() -> None:
