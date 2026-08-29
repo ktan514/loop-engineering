@@ -43,12 +43,16 @@
 - command、file path、branch名、SHA、class名、function名、field名
 - machine-readable JSONのkey/value
 - 製品名、ライブラリ名、protocol名、外部仕様の固定値
-- commit messageやbranch名の識別prefixである `fix`、`feat`、`hotfix`、`docs`、`test`、`refactor`、`chore` 等
+- commit messageの識別prefixである `fix:`、`feat:`、`docs:`、`test:`、`refactor:`、`chore:` 等
+- branchの識別prefixである `feature/`、`fix/`、`docs/`、`test/`、`refactor/` 等
 - 外部API等の原文を、原文であることを明示して引用する必要がある場合
 
-新規の機能追加（feature）を表す識別prefixは `feature` ではなく `feat` に統一する。
-commit messageでは `feat: ...`、branch名では `feat/...` を使用し、新規に `feature:` / `feature/` は使用しない。
-既存branch名・過去履歴にある `feature/...` は、名称変更だけを目的とした履歴改変を行わず旧名称として扱う。
+`ai-liver-yura`の運用に準拠し、機能追加の命名は次へ統一する。
+
+- commit message: `feat: 日本語の変更説明`
+- branch: `feature/xxx`
+
+`feat/...`をbranch prefixとして使用しない。`feature:`をcommit prefixとして使用しない。
 
 commit messageではprefixを英語識別子のまま使用してよいが、prefix以降の変更説明は日本語で成立させる。
 
@@ -67,12 +71,9 @@ commit messageではprefixを英語識別子のまま使用してよいが、pre
 
 ## 自律Completion Missionの継続
 
-このリポジトリでAutonomous Completion MissionがACTIVEの場合、
-個別のユーザープロンプトを新しい独立Missionとして扱わない。
+このリポジトリでAutonomous Completion MissionがACTIVEの場合、個別のユーザープロンプトを新しい独立Missionとして扱わない。
 
-ユーザーからの修正指示、設計判断、質問への回答、blocker解消指示、
-調査依頼、優先順位変更等は、明示的なMission終了指示がない限り、
-現在のMissionへの一時的な介入として扱う。
+ユーザーからの修正指示、設計判断、質問への回答、blocker解消指示、調査依頼、優先順位変更等は、明示的なMission終了指示がない限り、現在のMissionへの一時的な介入として扱う。
 
 介入処理が完了したら、その介入だけを完了して停止してはならない。
 
@@ -94,18 +95,13 @@ Missionを終了できるのは、ユーザーが明示的に次のいずれか�
 - `MISSION CANCEL`
 - Autonomous Completion Missionそのものを終了する明示指示
 
-単なる質問、修正依頼、方針回答、調査依頼、
-「Aで進めて」「それを修正して」「この方針で進めて」等は
-Mission終了として扱わない。
+単なる質問、修正依頼、方針回答、調査依頼、「Aで進めて」「それを修正して」「この方針で進めて」等はMission終了として扱わない。
 
 ### 一時停止
 
-真のSTOP条件が発生した場合は作業を一時停止してよいが、
-Mission自体を終了してはならない。
+真のSTOP条件が発生した場合は作業を一時停止してよいが、Mission自体を終了してはならない。
 
-Mission stateを `PAUSED_FOR_INTERVENTION` とし、
-GitHubのMission管理Issueおよび必要に応じてcurrent Work Issueへ
-Checkpointを残す。
+Mission stateを `PAUSED_FOR_INTERVENTION` とし、GitHubのMission管理Issueおよび必要に応じてcurrent Work IssueへCheckpointを残す。
 
 Checkpointには最低限、次を記録する。
 
@@ -119,8 +115,7 @@ Checkpointには最低限、次を記録する。
 - ユーザー判断が必要な内容
 - 再開後の最初のaction
 
-ユーザーの介入によってSTOP理由が解消した場合は、
-その介入処理だけで終了せず、元のMissionへ自動復帰する。
+ユーザーの介入によってSTOP理由が解消した場合は、その介入処理だけで終了せず、元のMissionへ自動復帰する。
 
 ### STOP条件ではないもの
 
@@ -142,8 +137,7 @@ Checkpointには最低限、次を記録する。
 
 ### 外部canonical review待ち
 
-`independent canonical review pending` は Human Intervention ではなく、
-`PAUSED_FOR_INTERVENTION` / Mission STOP条件として扱わない。
+`independent canonical review pending` は Human Intervention ではなく、`PAUSED_FOR_INTERVENTION` / Mission STOP条件として扱わない。
 
 current Workだけを `REVIEW_PENDING` として記録し、Mission stateは `ACTIVE` を維持する。
 
@@ -154,12 +148,10 @@ current Workだけを `REVIEW_PENDING` として記録し、Mission stateは `AC
 - 同じHEADへ重複review依頼を投稿しない
 - 新しいHEADが作られた場合だけ、新HEADに対するreview依頼を新規に行える
 
-review待ち中に、そのWorkへ依存しないdependency-ready Workが存在する場合は、
-GitHub live dependency graphを確認し、fresh Resume Gateを通してそちらを進める。
+review待ち中に、そのWorkへ依存しないdependency-ready Workが存在する場合は、GitHub live dependency graphを確認し、fresh Resume Gateを通してそちらを進める。
 review待ちのlineageへ無関係な変更を混ぜてはならない。
 
-進められる独立Workが存在しない場合は、その実行runを安全に終了してよいが、
-MissionをHuman Intervention待ちへ変更しない。
+進められる独立Workが存在しない場合は、その実行runを安全に終了してよいが、MissionをHuman Intervention待ちへ変更しない。
 
 pending reviewを再確認してよいのは、原則として次の場合だけとする。
 
@@ -171,17 +163,13 @@ pending reviewを再確認してよいのは、原則として次の場合だけ
 reviewがHOLDの場合は通常のfix / test / new-head review loopへ戻る。
 blocking 0の場合はReady / merge / trunk verification / Work Completionへ進む。
 
-reviewerは、同一exact HEADについて確認可能なblocking findingを可能な限り一度のreviewへまとめ、
-既に確認可能だった指摘を細切れに後出しして不要なreview cycleを増やさない。
+reviewerは、同一exact HEADについて確認可能なblocking findingを可能な限り一度のreviewへまとめ、既に確認可能だった指摘を細切れに後出しして不要なreview cycleを増やさない。
 
 ### MissionとWorkの関係
 
 Autonomous Completion Missionは個別Work Issueより上位の継続目標である。
-
 個別Workの完了はMission完了を意味しない。
 
-current Workが完了したらGitHub live dependency graphを再確認し、
-次のdependency-ready Workについてfresh Resume Gateを通して継続する。
+current Workが完了したらGitHub live dependency graphを再確認し、次のdependency-ready Workについてfresh Resume Gateを通して継続する。
 
-Missionの最終完了条件は、Mission管理IssueおよびRoot Issueが定義する
-全体完成条件を満たした場合だけとする。
+Missionの最終完了条件は、Mission管理IssueおよびRoot Issueが定義する全体完成条件を満たした場合だけとする。
