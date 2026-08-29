@@ -49,6 +49,8 @@ pipenv run python -m loop_engineering
 pipenv run python -m loop_engineering --config /path/to/another.ini
 ```
 
+CLIからWorkspace path自体を直接上書きする方式は通常経路にしません。Workspace pathのAuthorityは選択された設定ファイルです。
+
 起動時に設定されたWorkspaceのcanonical path、Git root、remote Repository identity、HEAD、dirty stateを確認し、設定対象と一致しないWorkspaceでは変更を開始しません。
 
 ## 設計・運用
