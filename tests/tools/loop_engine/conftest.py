@@ -1,4 +1,5 @@
-from tools.loop_engine.models import (
+from loop_engineering.config import LoopEngineConfig
+from loop_engineering.models import (
     CanonicalDesignSnapshot,
     LineageClassification,
     LineageSnapshot,
@@ -7,6 +8,24 @@ from tools.loop_engine.models import (
     SourceIdentity,
     WorkSnapshot,
 )
+
+
+def config() -> LoopEngineConfig:
+    return LoopEngineConfig(
+        repository="ktan514/ai-liver-yura",
+        owner="ktan514",
+        project_number=7,
+        mission_issue=450,
+        label="loop-engineering",
+        trunk_branch="rebuild/v2-foundation",
+        authority_refs=("#207", "#317", "#450", "#462"),
+        improvement_area="Subsystem/Development Tooling",
+        issue_level="Work",
+        root_issue=317,
+        parent_issue=462,
+        integration_work=471,
+        ci_workflow_name="V2 Deterministic CI",
+    )
 
 
 def identity(kind: str, stable_id: str) -> SourceIdentity:
