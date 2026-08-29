@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Protocol
 from urllib.parse import urlsplit
 
-from .config import LoopEngineConfig
+from .config import LoopEngineConfig, LoopEngineeringSettings
 
 
 class PreflightStatus(str, Enum):
@@ -120,11 +120,12 @@ class EnvironmentCapabilityPreflight:
         self._runner = runner
         self._environment = environment if environment is not None else os.environ
         self._reviewer_probe = reviewer_probe or UnixSocketTrustedReviewerBrokerProbe()
-        self._project_root = project_root or Path.cwd()
+        self._project_root = (project_root or Path.cwd()).resolve(strict=False)
         self._timeouts: list[str] = []
 
     def run(self) -> PreflightResult:
         capability = self._command_capabilities()
+        capability.update(self._workspace_capabilities())
         capability["github_repo_write"] = self._repository_write_allowed()
         capability["github_project_write"] = self._project_write_allowed()
         capability["mission_goal"] = self._mission_goal_matches()
@@ -132,6 +133,11 @@ class EnvironmentCapabilityPreflight:
         capability["trusted_reviewer"] = self._reviewer_available()
         capability.update(self._postgresql_capabilities())
         blocking_names = (
+            "workspace_path",
+            "workspace_git_root",
+            "workspace_repository_match",
+            "workspace_head_readable",
+            "workspace_state_readable",
             "github_cli",
             "github_repo_read",
             "github_repo_write",
@@ -174,7 +180,6 @@ class EnvironmentCapabilityPreflight:
     def _command_capabilities(self) -> dict[str, bool]:
         project = str(self._config.project_number)
         owner = self._config.owner
-        python = (sys.executable, "--version")
         probes = {
             "github_cli": ("gh", "auth", "status"),
             "github_repo_read": ("gh", "repo", "view", self._config.repository),
@@ -195,7 +200,7 @@ class EnvironmentCapabilityPreflight:
                 "--owner",
                 owner,
             ),
-            "python": python,
+            "python": (sys.executable, "--version"),
             "pytest": (sys.executable, "-m", "pytest", "--version"),
             "ruff": (sys.executable, "-m", "ruff", "--version"),
             "mypy": (sys.executable, "-m", "mypy", "--version"),
@@ -216,6 +221,42 @@ class EnvironmentCapabilityPreflight:
             )
         )
         return capability
+
+    def _workspace_capabilities(self) -> dict[str, bool]:
+        root = self._project_root
+        if not root.is_dir():
+            return {
+                "workspace_path": False,
+                "workspace_git_root": False,
+                "workspace_repository_match": False,
+                "workspace_head_readable": False,
+                "workspace_state_readable": False,
+            }
+        top = self._run(
+            "workspace_git_root",
+            ("git", "-C", str(root), "rev-parse", "--show-toplevel"),
+        )
+        remote = self._run(
+            "workspace_repository",
+            ("git", "-C", str(root), "remote", "get-url", "origin"),
+        )
+        head = self._run(
+            "workspace_head",
+            ("git", "-C", str(root), "rev-parse", "HEAD"),
+        )
+        state = self._run(
+            "workspace_state",
+            ("git", "-C", str(root), "status", "--porcelain"),
+        )
+        top_path = Path(top.output.strip()).resolve(strict=False) if top.succeeded else None
+        repository = _repository_from_remote(remote.output.strip()) if remote.succeeded else None
+        return {
+            "workspace_path": True,
+            "workspace_git_root": top_path == root,
+            "workspace_repository_match": repository == self._config.repository,
+            "workspace_head_readable": head.succeeded and len(head.output.strip()) == 40,
+            "workspace_state_readable": state.succeeded,
+        }
 
     def _repository_write_allowed(self) -> bool:
         result = self._run(
@@ -251,7 +292,9 @@ class EnvironmentCapabilityPreflight:
         return bool(socket_path and self._reviewer_probe.check(socket_path, 10.0))
 
     def _postgresql_capabilities(self) -> dict[str, bool]:
-        url = self._environment.get("LOOP_DATABASE_URL")
+        url = self._environment.get("LOOP_POSTGRES_DSN") or self._environment.get(
+            "LOOP_DATABASE_URL"
+        )
         if not url:
             return self._empty_database_capabilities()
         parsed = urlsplit(url)
@@ -325,10 +368,33 @@ class EnvironmentCapabilityPreflight:
         return result
 
 
+def _repository_from_remote(value: str) -> str | None:
+    if value.startswith("git@github.com:"):
+        repository = value.removeprefix("git@github.com:")
+    elif value.startswith("ssh://git@github.com/"):
+        repository = value.removeprefix("ssh://git@github.com/")
+    else:
+        parsed = urlsplit(value)
+        if parsed.hostname != "github.com":
+            return None
+        repository = parsed.path.lstrip("/")
+    if repository.endswith(".git"):
+        repository = repository[:-4]
+    parts = repository.split("/")
+    return repository if len(parts) == 2 and all(parts) else None
+
+
 def main() -> None:
-    config = LoopEngineConfig.from_environment()
+    platform_root = Path(__file__).resolve().parents[2]
+    settings = LoopEngineeringSettings.load(platform_root)
+    environment = settings.canonical_environment()
     print(
-        EnvironmentCapabilityPreflight(config, SubprocessCommandRunner()).run().as_json()
+        EnvironmentCapabilityPreflight(
+            settings.engine,
+            SubprocessCommandRunner(),
+            environment,
+            project_root=settings.workspace_path,
+        ).run().as_json()
     )
 
 
