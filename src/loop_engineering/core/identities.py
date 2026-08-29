@@ -1,4 +1,4 @@
-"""Provider-independent identity contracts."""
+"""提供元に依存しない識別子契約。"""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ from .serialization import canonical_digest
 
 def _require_text(value: str, field_name: str) -> None:
     if not value.strip():
-        raise ValueError(f"{field_name} must not be blank")
+        raise ValueError(f"{field_name}を空文字にはできません")
 
 
 def _require_aware(value: datetime, field_name: str) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError(f"{field_name} must be timezone-aware")
+        raise ValueError(f"{field_name}にはタイムゾーン付き日時が必要です")
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +92,7 @@ class CanonicalGeneration:
     def __post_init__(self) -> None:
         normalized_refs = _normalize_refs(self.refs)
         if not normalized_refs:
-            raise ValueError("CanonicalGeneration requires at least one reference")
+            raise ValueError("CanonicalGenerationには1件以上の参照が必要です")
         object.__setattr__(self, "refs", normalized_refs)
         object.__setattr__(
             self,

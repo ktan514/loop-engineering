@@ -1,4 +1,4 @@
-"""Provider-independent Loop Engineering Core contracts."""
+"""提供元に依存しないLoop Engineering Core契約。"""
 
 from .conflicts import Conflict, ConflictKind, ConflictScope, ConflictSeverity
 from .evidence import Evidence

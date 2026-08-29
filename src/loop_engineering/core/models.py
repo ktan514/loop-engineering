@@ -1,4 +1,4 @@
-"""Immutable provider-independent Core state models."""
+"""不変で提供元に依存しないCore状態モデル。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from .identities import ExecutionTarget, SourceIdentity
 
 def _require_text(value: str, field_name: str) -> None:
     if not value.strip():
-        raise ValueError(f"{field_name} must not be blank")
+        raise ValueError(f"{field_name}を空文字にはできません")
 
 
 def _require_optional_text(value: str | None, field_name: str) -> None:
@@ -27,7 +27,7 @@ def _require_text_tuple(values: tuple[str, ...], field_name: str) -> None:
 
 def _require_aware(value: datetime, field_name: str) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError(f"{field_name} must be timezone-aware")
+        raise ValueError(f"{field_name}にはタイムゾーン付き日時が必要です")
 
 
 class RunGoalKind(str, Enum):

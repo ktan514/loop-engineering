@@ -1,4 +1,4 @@
-"""Typed conflict contracts for reconciliation and gate decisions."""
+"""再調整と各判定で使用する型付き競合契約。"""
 
 from __future__ import annotations
 
@@ -55,4 +55,4 @@ class Conflict:
 
     def __post_init__(self) -> None:
         if not self.resolution_policy.strip():
-            raise ValueError("resolution_policy must not be blank")
+            raise ValueError("resolution_policyを空文字にはできません")

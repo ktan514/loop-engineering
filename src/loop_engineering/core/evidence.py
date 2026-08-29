@@ -1,4 +1,4 @@
-"""Exact-target evidence contracts."""
+"""厳密対象へ結び付ける証拠契約。"""
 
 from __future__ import annotations
 
@@ -10,12 +10,12 @@ from .identities import ExecutionTarget, SourceIdentity
 
 def _require_text(value: str, field_name: str) -> None:
     if not value.strip():
-        raise ValueError(f"{field_name} must not be blank")
+        raise ValueError(f"{field_name}を空文字にはできません")
 
 
 def _require_aware(value: datetime, field_name: str) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError(f"{field_name} must be timezone-aware")
+        raise ValueError(f"{field_name}にはタイムゾーン付き日時が必要です")
 
 
 @dataclass(frozen=True, slots=True)

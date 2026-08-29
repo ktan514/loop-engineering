@@ -1,34 +1,34 @@
-# Core State Contracts
+# Core状態契約
 
-Owner: Issue #10
-Status: Implementation design
-Canonical parents:
+管理Issue: #10
+状態: 実装設計
+上位正本:
 - `docs/architecture/core_foundation_implementation.md`
 - `docs/architecture/authority_and_state.md`
 
-## 1. Purpose
+## 1. 目的
 
-Generic Core Foundationの最下層として、provider非依存・immutable・deterministically serializableなState / Identity / Evidence契約を具体化する。
+Generic Core Foundationの最下層として、提供元非依存・不変・決定論的に直列化できる状態（State）・識別子（Identity）・証拠（Evidence）契約を具体化する。
 
-本書の型はprovider adapterからnormalized snapshotを受け取るDomain contractであり、GitHub/Codex/OpenAI/filesystem等のclient objectを保持しない。
+本書の型は提供元アダプター（provider adapter）から正規化済みsnapshotを受け取るDomain契約であり、GitHub/Codex/OpenAI/filesystem等のclient objectを保持しない。
 
-## 2. Module ownership
+## 2. モジュール責務
 
 ```text
 src/loop_engineering/core/
-├─ serialization.py  # canonical JSON / digest only
+├─ serialization.py  # 正規JSON / digestのみ
 ├─ identities.py     # SourceIdentity / ExecutionTarget / CanonicalGeneration
-├─ conflicts.py      # Conflict taxonomy and immutable Conflict
-├─ evidence.py       # exact-target Evidence
+├─ conflicts.py      # Conflict taxonomyと不変Conflict
+├─ evidence.py       # 厳密対象Evidence
 ├─ models.py         # RunGoal / WorkItem / Lineage / Checkpoint / ObservationEpoch
-└─ __init__.py       # stable public exports for Phase I
+└─ __init__.py       # Generic Coreの安定公開API
 ```
 
-`serialization.py`はDomain型をimportせず、dataclass / Enum / datetime / tuple / mapping等のgeneric valueだけを正規化する。これにより循環依存を避ける。
+`serialization.py`はDomain型をimportせず、dataclass / Enum / datetime / tuple / mapping等の汎用値だけを正規化する。これにより循環依存を避ける。
 
-## 3. Common invariants
+## 3. 共通不変条件
 
-- public DTOは原則 `@dataclass(frozen=True, slots=True)`
+- 公開DTOは原則 `@dataclass(frozen=True, slots=True)`
 - identityを構成する文字列は空文字・空白のみを禁止
 - timestampはtimezone-aware `datetime`のみ許可
 - collectionはimmutable tupleを基本とする
@@ -70,7 +70,7 @@ ExecutionTarget
 - canonical_generation_digest: str | None
 ```
 
-Review/CI/mergeでhead必須かどうかのtransition-specific判定は後続Decision/Effect Workの責務。本型はtarget identityの器だけを提供する。
+Review/CI/mergeでhead必須かどうかの遷移固有判定は後続Decision/Effect Workの責務。本型はtarget identityの器だけを提供する。
 
 ExecutionTargetのexact-target比較も各SourceIdentityのidentity fieldを基準とし、再観測時刻だけの差をtarget movementとみなさない。
 
@@ -90,7 +90,7 @@ Digestはidentity projectionのcanonical JSONをSHA-256し、lowercase hexとす
 
 ## 7. Conflict
 
-Taxonomy:
+分類（taxonomy）:
 
 ```text
 ConflictKind
@@ -190,7 +190,7 @@ WorkItem
 - lineage_refs: tuple[str, ...]
 ```
 
-Dependency-ready/actionable等のderived decisionは#11で実装し、本型へprovider-specific status logicを入れない。
+Dependency-ready/actionable等の派生判断はDecision Coreで行い、本型へprovider-specific status logicを入れない。
 
 ## 10. Lineage
 
@@ -219,7 +219,7 @@ Lineage
 - supersession: str | None
 ```
 
-「1 Work = 1 active lineage」の判定は#11 reconciliation responsibilityであり、本Workはclassification付きsnapshotのみ提供する。
+「1 Work = 1 active lineage」の判定はreconciliation責務であり、本契約はclassification付きsnapshotのみ提供する。
 
 ## 11. Checkpoint
 
@@ -260,9 +260,9 @@ ObservationEpoch
 - diagnostics: tuple[str, ...]
 ```
 
-`project_profile_snapshot`はPhase IIでProjectProfileSnapshot型が確立するまでSourceIdentityでprofile revisionだけをbindする暫定generic boundaryとする。Phase IIで型を置換する場合は設計更新を先行する。
+`project_profile_snapshot`はProjectProfileSnapshot型が確立するまでSourceIdentityでprofile revisionだけをbindする暫定generic boundaryとする。型を置換する場合は設計更新を先行する。
 
-## 13. Canonical serialization
+## 13. 正規直列化
 
 公開helper:
 
@@ -271,7 +271,7 @@ canonical_json(value) -> str
 canonical_digest(value) -> str
 ```
 
-Rules:
+規則:
 - UTF-8 JSON
 - key sort
 - compact separator
@@ -287,7 +287,7 @@ Serializationはcurrent-state Authorityを作るものではなく、equality/id
 
 Snapshot全体のcanonical JSONには観測timestampを含めてよい。一方、SourceIdentity equality、ExecutionTarget identity比較、CanonicalGeneration digest等の**identity-only operation**では観測timestampを除外したidentity projectionを使用する。
 
-## 14. Validation tests
+## 14. 検証項目
 
 最低限:
 - blank identity拒否
@@ -301,7 +301,7 @@ Snapshot全体のcanonical JSONには観測timestampを含めてよい。一方�
 - ObservationEpochを含むnested serialization決定論性
 - provider SDK/importがCoreに存在しない
 
-## 15. Non-goals
+## 15. 対象外
 
 - dependency-ready / actionable判定
 - reconciliation / scheduler
