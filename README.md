@@ -29,10 +29,14 @@ repository = owner/repository
 
 API key、token、database credential等の秘密値は設定ファイルへ直接書きません。設定ファイルには環境変数名だけを記載し、実値はGit管理外の`.env`へ定義します。
 
-```bash
-export GH_TOKEN="..."
-export OPENAI_API_KEY="..."
+```dotenv
+GH_TOKEN=
+OPENAI_API_KEY=
 ```
+
+Repository rootの`.env`はPipenvが自動読込します。通常起動前に`source .env`は行いません。Loop EngineeringのPythonコードも`.env`を直接読みません。
+
+`CODEX_BIN`や`PATH`などshell自体の設定はzsh側で管理し、`.env`へshell command substitutionを置きません。
 
 `config/loop-engineering.ini`と`.env`はGit管理対象外です。Repositoryへはexampleだけを保存します。
 
@@ -79,6 +83,8 @@ Project / Mission / Parent / Integration Workを同じIssue番号へ便宜的に
 pipenv run python -m loop_engineering
 ```
 
+PipenvがRepository rootの`.env`を環境へ注入し、Loop Engineering本体は`config/loop-engineering.ini`をロードします。
+
 別の設定ファイルを一時的に使用する場合だけ`--config`を指定できます。
 
 ```bash
@@ -94,6 +100,7 @@ CLIからWorkspace path自体を直接上書きする方式は通常経路にし
 - Platform / Product / Workspace境界: `docs/architecture/workspace_boundary.md`
 - Project Profile: `docs/architecture/project_profile.md`
 - 設定と秘密情報: `docs/architecture/configuration_and_secrets.md`
+- env読込境界: `docs/operations/env_loading_contract.md`
 - GitHub運用: `docs/operations/github_project_management.md`
 - active Mission Goal: `docs/operations/loop_mission_goal.md`
 
