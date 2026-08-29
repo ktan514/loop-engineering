@@ -58,7 +58,7 @@ def test_source_identity_rejects_blank_and_naive_timestamp() -> None:
     with pytest.raises(ValueError, match="stable_id"):
         source(stable_id="   ")
 
-    with pytest.raises(ValueError, match="timezone-aware"):
+    with pytest.raises(ValueError, match="タイムゾーン付き日時"):
         source(observed_at=datetime(2026, 8, 28, 10, 0))
 
 
@@ -118,7 +118,7 @@ def test_canonical_generation_is_order_and_observation_time_independent() -> Non
 
 
 def test_canonical_generation_rejects_empty_refs() -> None:
-    with pytest.raises(ValueError, match="at least one"):
+    with pytest.raises(ValueError, match="1件以上"):
         CanonicalGeneration.from_refs(())
 
 
@@ -220,7 +220,7 @@ def test_observation_epoch_nested_serialization_is_deterministic() -> None:
 
 
 def test_canonical_serialization_rejects_unordered_or_unknown_values() -> None:
-    with pytest.raises(TypeError, match="unordered collections"):
+    with pytest.raises(TypeError, match="順序を持たないcollection"):
         canonical_json({"a", "b"})
 
     with pytest.raises(TypeError, match="unsupported"):
