@@ -1,15 +1,17 @@
-"""Loop Engineeringの対象Repository・Project・Mission設定。"""
+"""Loop Engineeringの設定ファイルと秘密情報参照契約。"""
 
 from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from configparser import ConfigParser, SectionProxy
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
 class LoopEngineConfig:
-    """Product固有identityをCoreから分離する設定契約。"""
+    """Product固有identityをCoreから分離する非秘密設定。"""
 
     repository: str
     owner: str
@@ -54,59 +56,220 @@ class LoopEngineConfig:
         if any(not item.strip() for item in self.authority_refs):
             raise ValueError("authority_refsに空文字は指定できません")
 
-    @classmethod
-    def from_environment(
-        cls,
-        environment: Mapping[str, str] | None = None,
-    ) -> "LoopEngineConfig":
-        """秘密情報を含まない実行設定を環境変数から構築する。"""
 
+@dataclass(frozen=True, slots=True)
+class ModelConfig:
+    """モデルとAPIの非秘密設定。"""
+
+    implementer_provider: str
+    implementer_model: str
+    reviewer_provider: str
+    reviewer_model: str
+    reviewer_api_base: str
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("implementer_provider", self.implementer_provider),
+            ("implementer_model", self.implementer_model),
+            ("reviewer_provider", self.reviewer_provider),
+            ("reviewer_model", self.reviewer_model),
+            ("reviewer_api_base", self.reviewer_api_base),
+        ):
+            if not value.strip():
+                raise ValueError(f"{name}を空文字にはできません")
+
+
+@dataclass(frozen=True, slots=True)
+class SecretReferenceConfig:
+    """秘密値そのものではなく、値を保持する環境変数名だけを持つ。"""
+
+    github_token_env: str
+    reviewer_api_key_env: str
+    operational_store_dsn_env: str
+    trusted_reviewer_socket_env: str
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("github_token_env", self.github_token_env),
+            ("reviewer_api_key_env", self.reviewer_api_key_env),
+            ("operational_store_dsn_env", self.operational_store_dsn_env),
+            ("trusted_reviewer_socket_env", self.trusted_reviewer_socket_env),
+        ):
+            _validate_env_name(name, value)
+
+
+@dataclass(frozen=True, slots=True)
+class LoopEngineeringSettings:
+    """1つのProduct Workspaceを実行するためのホスト設定。"""
+
+    config_path: Path
+    project_key: str
+    workspace_path: Path
+    engine: LoopEngineConfig
+    models: ModelConfig
+    secrets: SecretReferenceConfig
+
+    @classmethod
+    def load(
+        cls,
+        platform_root: Path,
+        environment: Mapping[str, str] | None = None,
+        *,
+        config_path: Path | None = None,
+    ) -> "LoopEngineeringSettings":
         values = environment if environment is not None else os.environ
-        repository = values.get("LOOP_REPOSITORY", "ktan514/loop-engineering")
-        owner = values.get("LOOP_PROJECT_OWNER") or repository.split("/", 1)[0]
-        project_number = _required_int(values, "LOOP_PROJECT_NUMBER")
-        mission_issue = _required_int(values, "LOOP_MISSION_ISSUE")
-        return cls(
+        selected = config_path or _configured_path(platform_root, values)
+        selected = selected.expanduser()
+        if not selected.is_absolute():
+            selected = platform_root / selected
+        selected = selected.resolve(strict=False)
+        if not selected.is_file():
+            raise ValueError(f"設定ファイルが見つかりません: {selected}")
+
+        parser = ConfigParser(interpolation=None)
+        try:
+            with selected.open("r", encoding="utf-8") as stream:
+                parser.read_file(stream)
+        except (OSError, UnicodeError) as error:
+            raise ValueError("設定ファイルを読み取れません") from error
+
+        project = _section(parser, "project")
+        models = _section(parser, "models")
+        credentials = _section(parser, "credentials")
+        operational_store = _section(parser, "operational_store")
+        runtime = _section(parser, "runtime")
+
+        repository = _required(project, "repository")
+        owner = project.get("project_owner", "").strip() or repository.split("/", 1)[0]
+        workspace = Path(_required(project, "workspace_path")).expanduser()
+        if not workspace.is_absolute():
+            raise ValueError("workspace_pathは絶対pathで指定してください")
+        workspace = workspace.resolve(strict=False)
+
+        engine = LoopEngineConfig(
             repository=repository,
             owner=owner,
-            project_number=project_number,
-            mission_issue=mission_issue,
-            label=values.get("LOOP_LABEL", "loop-engineering"),
-            trunk_branch=values.get("LOOP_TRUNK_BRANCH", "main"),
-            authority_refs=_csv(values.get("LOOP_AUTHORITY_REFS", "")),
-            improvement_area=values.get("LOOP_IMPROVEMENT_AREA", "Runtime / Infrastructure"),
-            issue_level=values.get("LOOP_ISSUE_LEVEL", "Work"),
-            root_issue=_optional_int(values, "LOOP_ROOT_ISSUE"),
-            parent_issue=_optional_int(values, "LOOP_PARENT_ISSUE"),
-            integration_work=_optional_int(values, "LOOP_INTEGRATION_WORK"),
-            ci_workflow_name=values.get("LOOP_CI_WORKFLOW_NAME", "Deterministic CI"),
+            project_number=_required_int_section(project, "project_number"),
+            mission_issue=_required_int_section(project, "mission_issue"),
+            label=project.get("label", "loop-engineering").strip() or "loop-engineering",
+            trunk_branch=project.get("trunk_branch", "main").strip() or "main",
+            authority_refs=_csv(project.get("authority_refs", "")),
+            improvement_area=(
+                project.get("improvement_area", "Runtime / Infrastructure").strip()
+                or "Runtime / Infrastructure"
+            ),
+            issue_level=project.get("issue_level", "Work").strip() or "Work",
+            root_issue=_optional_int_section(project, "root_issue"),
+            parent_issue=_optional_int_section(project, "parent_issue"),
+            integration_work=_optional_int_section(project, "integration_work"),
+            ci_workflow_name=(
+                project.get("ci_workflow_name", "Deterministic CI").strip()
+                or "Deterministic CI"
+            ),
+        )
+        model_config = ModelConfig(
+            implementer_provider=models.get("implementer_provider", "codex").strip() or "codex",
+            implementer_model=models.get("implementer_model", "default").strip() or "default",
+            reviewer_provider=models.get("reviewer_provider", "openai").strip() or "openai",
+            reviewer_model=_required(models, "reviewer_model"),
+            reviewer_api_base=(
+                models.get("reviewer_api_base", "https://api.openai.com/v1").strip()
+                or "https://api.openai.com/v1"
+            ),
+        )
+        secrets = SecretReferenceConfig(
+            github_token_env=(
+                credentials.get("github_token_env", "GH_TOKEN").strip() or "GH_TOKEN"
+            ),
+            reviewer_api_key_env=(
+                models.get("reviewer_api_key_env", "OPENAI_API_KEY_REVIEWER").strip()
+                or "OPENAI_API_KEY_REVIEWER"
+            ),
+            operational_store_dsn_env=(
+                operational_store.get("dsn_env", "LOOP_POSTGRES_DSN").strip()
+                or "LOOP_POSTGRES_DSN"
+            ),
+            trusted_reviewer_socket_env=(
+                runtime.get("trusted_reviewer_socket_env", "LOOP_TRUSTED_REVIEWER_SOCKET").strip()
+                or "LOOP_TRUSTED_REVIEWER_SOCKET"
+            ),
+        )
+        return cls(
+            config_path=selected,
+            project_key=_required(project, "key"),
+            workspace_path=workspace,
+            engine=engine,
+            models=model_config,
+            secrets=secrets,
         )
 
+    def canonical_environment(
+        self,
+        environment: Mapping[str, str] | None = None,
+    ) -> dict[str, str]:
+        """設定された環境変数名から、内部で使う標準名へ秘密値を写像する。"""
 
-def _required_int(values: Mapping[str, str], name: str) -> int:
-    raw = values.get(name)
-    if raw is None:
-        raise ValueError(f"{name}が設定されていません")
-    try:
-        value = int(raw)
-    except ValueError as error:
-        raise ValueError(f"{name}は整数で指定してください") from error
-    if value < 1:
-        raise ValueError(f"{name}は1以上で指定してください")
+        values = dict(environment if environment is not None else os.environ)
+        mappings = (
+            ("GH_TOKEN", self.secrets.github_token_env),
+            ("OPENAI_API_KEY_REVIEWER", self.secrets.reviewer_api_key_env),
+            ("LOOP_POSTGRES_DSN", self.secrets.operational_store_dsn_env),
+            ("LOOP_TRUSTED_REVIEWER_SOCKET", self.secrets.trusted_reviewer_socket_env),
+        )
+        for canonical_name, configured_name in mappings:
+            value = values.get(configured_name)
+            if value:
+                values[canonical_name] = value
+        return values
+
+
+def _configured_path(platform_root: Path, environment: Mapping[str, str]) -> Path:
+    raw = environment.get("LOOP_CONFIG_FILE")
+    if raw:
+        return Path(raw)
+    return platform_root / "config" / "loop-engineering.ini"
+
+
+def _section(parser: ConfigParser, name: str) -> SectionProxy:
+    if not parser.has_section(name):
+        raise ValueError(f"設定section [{name}] がありません")
+    return parser[name]
+
+
+def _required(section: SectionProxy, name: str) -> str:
+    value = section.get(name, "").strip()
+    if not value:
+        raise ValueError(f"設定値 {section.name}.{name} がありません")
     return value
 
 
-def _optional_int(values: Mapping[str, str], name: str) -> int | None:
-    raw = values.get(name)
-    if raw in {None, ""}:
+def _required_int_section(section: SectionProxy, name: str) -> int:
+    raw = _required(section, name)
+    try:
+        value = int(raw)
+    except ValueError as error:
+        raise ValueError(f"{section.name}.{name}は整数で指定してください") from error
+    if value < 1:
+        raise ValueError(f"{section.name}.{name}は1以上で指定してください")
+    return value
+
+
+def _optional_int_section(section: SectionProxy, name: str) -> int | None:
+    raw = section.get(name, "").strip()
+    if not raw:
         return None
     try:
         value = int(raw)
     except ValueError as error:
-        raise ValueError(f"{name}は整数で指定してください") from error
+        raise ValueError(f"{section.name}.{name}は整数で指定してください") from error
     if value < 1:
-        raise ValueError(f"{name}は1以上で指定してください")
+        raise ValueError(f"{section.name}.{name}は1以上で指定してください")
     return value
+
+
+def _validate_env_name(name: str, value: str) -> None:
+    if not value or not value.replace("_", "").isalnum() or value[0].isdigit():
+        raise ValueError(f"{name}に不正な環境変数名が指定されています")
 
 
 def _csv(raw: str) -> tuple[str, ...]:
