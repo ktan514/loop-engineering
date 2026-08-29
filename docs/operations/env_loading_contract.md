@@ -60,7 +60,20 @@ pipenv run python -m loop_engineering --once
 pipenv run python -m loop_engineering --config /path/to/another.ini
 ```
 
-## 6. Hard invariants
+## 6. 実運転検証
+
+Issue #38の最小の実運転試験（E2E Pilot）では、次のコマンドで限定遷移を1回だけ実行する。
+
+```bash
+pipenv run python -m loop_engineering --once
+```
+
+この試験を通常の統合手順で完了した後、Issue #27で作業の統合後に次の作業計画または
+正当な`YIELD_EXTERNAL`へ進むことを確認する。
+
+この試験は実行時の仕様を変更しない。
+
+## 7. Hard invariants
 
 - Pythonコードから`.env`をロードしない
 - `.env`へshell command substitutionを書かない
