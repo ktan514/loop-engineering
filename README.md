@@ -29,13 +29,49 @@ repository = owner/repository
 
 API key、token、database credential等の秘密値は設定ファイルへ直接書きません。設定ファイルには環境変数名だけを記載し、実値はGit管理外の`.env`へ定義します。
 
-```dotenv
-GH_TOKEN=...
-OPENAI_API_KEY_REVIEWER=...
-LOOP_POSTGRES_DSN=...
+```bash
+export GH_TOKEN="..."
+export OPENAI_API_KEY="..."
 ```
 
 `config/loop-engineering.ini`と`.env`はGit管理対象外です。Repositoryへはexampleだけを保存します。
+
+`LOOP_POSTGRES_DSN`と`LOOP_TRUSTED_REVIEWER_SOCKET`は、利用契約を確定するまではローカル`.env`へ未確定値を定義しません。
+
+## standalone自身を対象にした実運転設定
+
+`loop-engineering`自身をProduct Workspaceとして検証する場合、GitHub側の現在Authorityは次です。
+
+- Repository: `ktan514/loop-engineering`
+- Project: `loop-engineering` / Project #9
+- Mission: Issue #33
+- Parent: Issue #9
+- 運用Authority: Issue #26
+- 現在の実運転Work: Issue #27
+- `root_issue`: 現時点では未設定
+
+ローカルの`config/loop-engineering.ini`では、Workspace pathだけ実際の絶対pathへ置き換えます。
+
+```ini
+[project]
+key = loop-engineering
+workspace_path = /absolute/path/to/loop-engineering
+repository = ktan514/loop-engineering
+trunk_branch = main
+project_owner = ktan514
+project_number = 9
+mission_issue = 33
+root_issue =
+parent_issue = 9
+integration_work = 27
+label = loop-engineering
+authority_refs = #26, #33
+ci_workflow_name = Loop Engineering Deterministic CI
+improvement_area = Runtime / Infrastructure
+issue_level = Work
+```
+
+Project / Mission / Parent / Integration Workを同じIssue番号へ便宜的に潰しません。GitHub liveとMission #33を現在状態の正本として扱います。
 
 ## 起動
 
@@ -59,5 +95,6 @@ CLIからWorkspace path自体を直接上書きする方式は通常経路にし
 - Project Profile: `docs/architecture/project_profile.md`
 - 設定と秘密情報: `docs/architecture/configuration_and_secrets.md`
 - GitHub運用: `docs/operations/github_project_management.md`
+- active Mission Goal: `docs/operations/loop_mission_goal.md`
 
-現在の統合作業はGitHub Issue #24 / PR #25で管理します。
+現在のstandalone完成MissionはGitHub Issue #33で管理し、設定Authority整備はIssue #31、旧`tools/loop_engine`整理はIssue #32、実運転確認はIssue #27で管理します。
