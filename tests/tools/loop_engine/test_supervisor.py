@@ -1,16 +1,16 @@
-from tools.loop_engine.models import (
+from loop_engineering.models import (
     LineageClassification,
     LineageSnapshot,
     MissionSnapshot,
     RunDisposition,
 )
-from tools.loop_engine.supervisor import MissionSupervisor
+from loop_engineering.supervisor import MissionSupervisor
 
-from .conftest import epoch, identity, lineage, work
+from .conftest import config, epoch, identity, lineage, work
 
 
 def test_resume_pass_creates_complete_secret_safe_task_packet() -> None:
-    decision = MissionSupervisor().decide(epoch())
+    decision = MissionSupervisor(config()).decide(epoch())
     packet = decision.task_packet
     assert decision.disposition is RunDisposition.CONTINUE
     assert decision.resume_certificate.gate == "PASS"
@@ -21,7 +21,7 @@ def test_resume_pass_creates_complete_secret_safe_task_packet() -> None:
 
 
 def test_resume_stop_never_creates_task_packet() -> None:
-    decision = MissionSupervisor().decide(
+    decision = MissionSupervisor(config()).decide(
         epoch(mission=MissionSnapshot(identity("issue", "450"), 465, True))
     )
     assert decision.resume_certificate.gate == "STOP"
@@ -29,12 +29,12 @@ def test_resume_stop_never_creates_task_packet() -> None:
 
 
 def test_duplicate_wait_and_false_mission_complete_are_yield_external() -> None:
-    first = MissionSupervisor().decide(epoch())
+    first = MissionSupervisor(config()).decide(epoch())
     assert first.task_packet is not None
-    duplicate = MissionSupervisor().decide(
+    duplicate = MissionSupervisor(config()).decide(
         epoch(checkpoint_schedule_keys=(first.task_packet.schedule_key,))
     )
-    empty = MissionSupervisor().decide(
+    empty = MissionSupervisor(config()).decide(
         epoch(mission=MissionSnapshot(identity("issue", "450"), None), works=())
     )
     assert duplicate.duplicate_suppressed
@@ -43,7 +43,7 @@ def test_duplicate_wait_and_false_mission_complete_are_yield_external() -> None:
 
 
 def test_only_root_completion_evidence_allows_mission_complete() -> None:
-    decision = MissionSupervisor().decide(
+    decision = MissionSupervisor(config()).decide(
         epoch(mission=MissionSnapshot(identity("issue", "450"), None, False, True), works=())
     )
     assert decision.disposition is RunDisposition.MISSION_COMPLETE
@@ -61,7 +61,7 @@ def test_unrelated_work_conflict_does_not_block_independent_actionable_work() ->
         "base-1",
         "head-1",
     )
-    decision = MissionSupervisor().decide(
+    decision = MissionSupervisor(config()).decide(
         epoch(
             mission=MissionSnapshot(identity("issue", "450"), 466),
             works=(blocked, independent),
