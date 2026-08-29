@@ -57,7 +57,7 @@ class LoopEngineConfig:
             raise ValueError("authority_refsに空文字は指定できません")
 
     @classmethod
-    def from_environment(cls, environment: Mapping[str, str]) -> "LoopEngineConfig":
+    def from_environment(cls, environment: Mapping[str, str]) -> LoopEngineConfig:
         """設定loaderが生成した内部環境を既存Host境界へ受け渡す互換入口。"""
 
         repository = _required_mapping(environment, "LOOP_REPOSITORY")
@@ -145,7 +145,7 @@ class LoopEngineeringSettings:
         environment: Mapping[str, str] | None = None,
         *,
         config_path: Path | None = None,
-    ) -> "LoopEngineeringSettings":
+    ) -> LoopEngineeringSettings:
         values = environment if environment is not None else os.environ
         selected = config_path or _configured_path(platform_root, values)
         selected = selected.expanduser()
