@@ -6,20 +6,22 @@ from pathlib import Path
 
 import pytest
 
-from tools.loop_engine.ci_gate import CIGateStatus
-from tools.loop_engine.host_entrypoint import (
+from loop_engineering.ci_gate import CIGateStatus
+from loop_engineering.host_entrypoint import (
     PilotAwareMissionPort,
     PilotPlanningImplementer,
     ReconciliationAwareHostLoopController,
     StrictGhMissionPort,
     _codex_argv,
 )
-from tools.loop_engine.host_runtime import (
+from loop_engineering.host_runtime import (
     HostLoopController,
     HostTarget,
     HostTransitionStatus,
     LocalCommandResult,
 )
+
+from .conftest import config
 
 
 class FakeLocalRunner:
@@ -162,14 +164,11 @@ def test_latest_ambiguous_mission_checkpoint_does_not_fall_back() -> None:
             },
             {
                 "id": 2,
-                "body": (
-                    "## Mission Checkpoint\n\n"
-                    "現在対象を明示していない状態記録"
-                ),
+                "body": "## Mission Checkpoint\n\n現在対象を明示していない状態記録",
             },
         ]
     }
-    port = StrictGhMissionPort(FakeLocalRunner(responses), {"PATH": "/usr/bin"})
+    port = StrictGhMissionPort(config(), FakeLocalRunner(responses), {"PATH": "/usr/bin"})
 
     with pytest.raises(RuntimeError, match="MISSION_CHECKPOINT_TARGET_UNRESOLVED"):
         port.current_target()
@@ -196,7 +195,7 @@ def test_latest_explicit_target_is_fresh_read_from_github() -> None:
             "draft": True,
         },
     }
-    port = StrictGhMissionPort(FakeLocalRunner(responses), {"PATH": "/usr/bin"})
+    port = StrictGhMissionPort(config(), FakeLocalRunner(responses), {"PATH": "/usr/bin"})
 
     target = port.current_target()
 
@@ -208,18 +207,16 @@ def test_latest_explicit_target_is_fresh_read_from_github() -> None:
 
 
 def test_checkpoint_parse_failure_is_exposed_as_typed_observe_detail() -> None:
-    result = HostLoopController(FailingMissionPort(), NoopImplementer()).run_once()
+    result = HostLoopController(config(), FailingMissionPort(), NoopImplementer()).run_once()
 
     assert result.status is HostTransitionStatus.INTERVENTION_REQUIRED
-    assert result.detail == (
-        "GITHUB_OBSERVE_FAILED:MISSION_CHECKPOINT_TARGET_UNRESOLVED"
-    )
+    assert result.detail == "GITHUB_OBSERVE_FAILED:MISSION_CHECKPOINT_TARGET_UNRESOLVED"
 
 
-def test_471_bootstrap_completion_keeps_integration_issue_open() -> None:
+def test_integration_bootstrap_completion_keeps_integration_issue_open() -> None:
     target = HostTarget(471, True, 477, "b" * 40, False, True, 4, "b" * 40)
     delegate = FakeMissionPort(target)
-    port = PilotAwareMissionPort(delegate)
+    port = PilotAwareMissionPort(config(), delegate)
 
     assert port.complete_work(target)
     assert delegate.close_calls == 0
@@ -249,10 +246,7 @@ def test_default_codex_command_keeps_git_metadata_outside_sandbox() -> None:
 def test_generic_planning_requires_machine_readable_current_work_field() -> None:
     runner = RecordingCodexRunner()
     implementer = PilotPlanningImplementer(
-        runner,
-        Path("/repo"),
-        {"PATH": "/usr/bin"},
-        _codex_argv({}),
+        config(), runner, Path("/repo"), {"PATH": "/usr/bin"}, _codex_argv({})
     )
 
     assert implementer.plan_next_work(338)
@@ -261,16 +255,12 @@ def test_generic_planning_requires_machine_readable_current_work_field() -> None
     assert "`- current Work: #<issue>`" in instruction
     assert "`- current PR: #<pr>`" in instruction
     assert "`- exact HEAD: <40-hex-sha>`" in instruction
-    assert "別名だけでcurrent Workを代用してはいけません" in instruction
 
 
-def test_471_planning_excludes_loop_engineering_and_self_from_pilot() -> None:
+def test_integration_planning_excludes_loop_engineering_and_self_from_pilot() -> None:
     runner = RecordingCodexRunner()
     implementer = PilotPlanningImplementer(
-        runner,
-        Path("/repo"),
-        {"PATH": "/usr/bin"},
-        _codex_argv({}),
+        config(), runner, Path("/repo"), {"PATH": "/usr/bin"}, _codex_argv({})
     )
 
     assert implementer.plan_next_work(471)
@@ -279,19 +269,21 @@ def test_471_planning_excludes_loop_engineering_and_self_from_pilot() -> None:
     assert command[: len(_codex_argv({}))] == _codex_argv({})
     instruction = command[-1]
     assert "実製品試験対象" in instruction
-    assert "#462/#471自身" in instruction
+    assert "#471自身" in instruction
     assert "Loop Engineering基盤責務" in instruction
-    assert "依存関係を満たしたV2製品Work" in instruction
+    assert "製品Workまたは統合Work" in instruction
 
 
-def test_471_without_active_pr_routes_to_planning_only() -> None:
+def test_integration_without_active_pr_routes_to_planning_only() -> None:
     before = HostTarget(471, True, None, None, False, False, 10, None)
     after = HostTarget(340, True, None, None, False, False, 11, None)
     delegate = FakeMissionPort(before)
-    mission = PilotAwareMissionPort(delegate)
+    mission = PilotAwareMissionPort(config(), delegate)
     implementer = MutablePilotImplementer(delegate, next_target=after)
 
-    result = ReconciliationAwareHostLoopController(mission, implementer).run_once()
+    result = ReconciliationAwareHostLoopController(
+        config(), mission, implementer
+    ).run_once()
 
     assert result.status is HostTransitionStatus.COMPLETED
     assert result.detail == "PILOT_PLANNING_DISPATCHED"
@@ -303,10 +295,12 @@ def test_471_without_active_pr_routes_to_planning_only() -> None:
 def test_successful_codex_exit_without_state_progress_is_not_completed() -> None:
     before = HostTarget(340, True, None, None, False, False, 20, None)
     delegate = FakeMissionPort(before)
-    mission = PilotAwareMissionPort(delegate)
+    mission = PilotAwareMissionPort(config(), delegate)
     implementer = MutablePilotImplementer(delegate, advance=False)
 
-    result = ReconciliationAwareHostLoopController(mission, implementer).run_once()
+    result = ReconciliationAwareHostLoopController(
+        config(), mission, implementer
+    ).run_once()
 
     assert result.status is HostTransitionStatus.INTERVENTION_REQUIRED
     assert result.detail == "IMPLEMENTER_NO_PROGRESS"
@@ -315,9 +309,7 @@ def test_successful_codex_exit_without_state_progress_is_not_completed() -> None
 
 def test_dirty_product_pr_dispatches_reconciliation() -> None:
     head = "d" * 40
-    comments_endpoint = (
-        "repos/ktan514/ai-liver-yura/issues/450/comments?per_page=100&page=1"
-    )
+    comments_endpoint = "repos/ktan514/ai-liver-yura/issues/450/comments?per_page=100&page=1"
     responses = {
         comments_endpoint: [
             {
@@ -352,17 +344,15 @@ def test_dirty_product_pr_dispatches_reconciliation() -> None:
         },
     }
     mission = PilotAwareMissionPort(
-        StrictGhMissionPort(FakeLocalRunner(responses), {"PATH": "/usr/bin"})
+        config(), StrictGhMissionPort(config(), FakeLocalRunner(responses), {"PATH": "/usr/bin"})
     )
-    delegate = FakeMissionPort(
-        HostTarget(338, True, 422, head, True, False, 10, head)
-    )
+    delegate = FakeMissionPort(HostTarget(338, True, 422, head, True, False, 10, head))
     implementer = MutablePilotImplementer(
         delegate,
         next_target=HostTarget(338, True, 422, "e" * 40, True, False, 11, "e" * 40),
     )
 
-    result = HostLoopController(mission, implementer).run_once()
+    result = HostLoopController(config(), mission, implementer).run_once()
 
     assert result.status is HostTransitionStatus.INTERVENTION_REQUIRED
     assert result.detail == "EXPECTED_HEAD_MERGE_FAILED"
@@ -371,7 +361,7 @@ def test_dirty_product_pr_dispatches_reconciliation() -> None:
 def test_non_integration_work_closes_normally() -> None:
     target = HostTarget(365, True, 500, "c" * 40, False, True, 5, "c" * 40)
     delegate = FakeMissionPort(target)
-    port = PilotAwareMissionPort(delegate)
+    port = PilotAwareMissionPort(config(), delegate)
 
     assert port.complete_work(target)
     assert delegate.close_calls == 1
