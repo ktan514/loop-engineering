@@ -8,6 +8,7 @@ from pathlib import Path
 from pytest import CaptureFixture, MonkeyPatch
 
 from loop_engineering import __main__ as cli
+from loop_engineering.config import LoopEngineeringSettings
 from loop_engineering.host_runtime import HostTransitionResult, HostTransitionStatus
 
 from .conftest import config
@@ -26,7 +27,7 @@ class FakeSettings:
 
 def install_fake_settings(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(
-        cli.LoopEngineeringSettings,
+        LoopEngineeringSettings,
         "load",
         classmethod(lambda cls, *args, **kwargs: FakeSettings()),
     )
