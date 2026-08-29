@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import date
 
+from .config import LoopEngineConfig
 from .health import advance_health, plan_improvements
 from .models import (
     ConflictKind,
@@ -23,11 +24,14 @@ from .scheduler import canonical_lineage, is_duplicate, schedule_key, select_wor
 from .write_gate import validate
 
 
+@dataclass(slots=True)
 class MissionSupervisor:
-    """供給された現在観測だけから判断し、GitHub通信そのものは担当しない。"""
+    """供給された現在観測と設定だけから判断し、外部通信そのものは担当しない。"""
+
+    config: LoopEngineConfig
 
     def reconcile(self, epoch: ObservationEpoch) -> tuple[ConflictKind, ...]:
-        return reconcile(epoch)
+        return reconcile(epoch, self.config)
 
     def decide(
         self,
@@ -56,7 +60,7 @@ class MissionSupervisor:
         )
 
     def _decide_primary(self, epoch: ObservationEpoch) -> SupervisorDecision:
-        global_conflicts = reconcile_global(epoch)
+        global_conflicts = reconcile_global(epoch, self.config)
         eligible = tuple(
             work
             for work in epoch.works
@@ -108,7 +112,12 @@ class MissionSupervisor:
         fresh_preconditions: Mapping[str, str],
         readback_effect: Mapping[str, str] | None = None,
     ) -> WriteGateResult:
-        return validate(intent, fresh_preconditions, readback_effect)
+        return validate(
+            intent,
+            fresh_preconditions,
+            readback_effect,
+            config=self.config,
+        )
 
     def _certificate(
         self,
@@ -135,17 +144,22 @@ class MissionSupervisor:
     def _packet(self, epoch: ObservationEpoch, work: WorkSnapshot, key: str) -> TaskPacket:
         lineage = canonical_lineage(epoch, work.issue_number)
         exact = (f"base:{lineage.base_sha}" if lineage and lineage.base_sha else "base:none",)
+        authority = self.config.authority_refs + (f"work:#{work.issue_number}",)
         return TaskPacket(
             f"packet:{key[:16]}",
             key,
             epoch.observation_id,
-            ("#207", "#317", "#450", "#462", f"#{work.issue_number}"),
+            authority,
             ("開発支援基盤", "決定論的なMission監督"),
-            ("OpenAIレビューワー通信", "PostgreSQL運用記憶", "製品実行時の割当"),
+            ("レビューワー通信", "運用記憶の永続化方式", "製品実行時の割当"),
             exact,
             ("現在の依存関係完了証拠",),
             ("対象試験", "Ruff", "厳格Mypy", "全pytest", "厳密HEAD CI"),
-            ("Project #7だけを変更対象にする", "秘密情報を含めない", "基幹へ直接書き込まない"),
+            (
+                f"Project #{self.config.project_number}だけを変更対象にする",
+                "秘密情報を含めない",
+                f"基幹 `{self.config.trunk_branch}` へ直接書き込まない",
+            ),
             lineage.identity.stable_id if lineage else None,
             "IMPLEMENT",
         )

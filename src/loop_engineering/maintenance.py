@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Protocol
 
+from .config import LoopEngineConfig
 from .github_issues import improvement_intent
 from .models import (
     ImprovementCandidate,
@@ -37,6 +38,7 @@ class LoopMaintenanceCycleResult:
 
 @dataclass(slots=True)
 class SelfImprovementController:
+    config: LoopEngineConfig
     publisher: ImprovementPublisher
 
     def publish_candidates(
@@ -47,7 +49,9 @@ class SelfImprovementController:
         failures: list[ImprovementPublishFailure] = []
         for candidate in candidates:
             try:
-                published.append(self.publisher.publish(improvement_intent(candidate)))
+                published.append(
+                    self.publisher.publish(improvement_intent(candidate, self.config))
+                )
             except Exception:
                 # 生の例外文章にはコマンドや提供元の詳細が含まれる可能性がある。
                 # 公開結果には安定した理由だけを残す。

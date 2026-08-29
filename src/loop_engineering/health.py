@@ -6,6 +6,7 @@ import hashlib
 import json
 from datetime import date, timedelta
 
+from .config import LoopEngineConfig
 from .health_state import canonicalize_event, durable_identity
 from .models import (
     ConflictKind,
@@ -170,15 +171,19 @@ def marker(key: str) -> str:
     return f"<!-- loop-improvement-key:{key} -->"
 
 
-def render_issue_body(candidate: ImprovementCandidate) -> str:
+def render_issue_body(candidate: ImprovementCandidate, config: LoopEngineConfig) -> str:
+    """設定済みAuthorityに結び付けた日本語の改善Issue本文を生成する。"""
     affected = ", ".join(f"#{item}" for item in candidate.affected_work_ids) or "なし"
     evidence = "\n".join(f"- `{item}`" for item in candidate.evidence_refs) or "- なし"
+    authority = "\n".join(f"- {item}" for item in config.authority_refs) or "- GitHubの現在状態"
     return (
         f"{marker(candidate.improvement_key)}\n\n"
-        "親Issue: #462\nMission: #450\nIssue階層: Work\n\n"
+        f"Issue level: {config.issue_level}\n\n"
+        "## 正本\n\n"
+        f"{authority}\n\n"
         "## 自動生成元\n\n"
-        "Loop Engineeringの自己改善系統（Self-Improvement Lane）が、通常実行中の"
-        "型付き健全性証拠から生成した改善Workです。\n\n"
+        "Loop Engineeringの自己改善系統が、通常実行中の型付き健全性証拠から"
+        "生成した改善Workです。\n\n"
         f"- 発火条件: `{candidate.kind.value}`\n"
         f"- 優先度: `{candidate.severity.value}`\n"
         f"- 影響Work: {affected}\n"
@@ -189,11 +194,10 @@ def render_issue_body(candidate: ImprovementCandidate) -> str:
         "## 証拠\n\n"
         f"{evidence}\n\n"
         "## 完了条件\n\n"
-        "- 同じ健全性指紋（health fingerprint）の再発原因を設計・実装で解消する\n"
+        "- 同じ健全性指紋の再発原因を設計・実装で解消する\n"
         "- 失敗・復旧情報を型付きかつ秘密情報を含まない状態で維持する\n"
         "- 自動回復可能な事象を人間介入へ送らない\n"
-        "- 対象試験、Ruff、厳格Mypy、全pytest、厳密HEAD CI、正本レビューを実行する\n\n"
-        "Project #6は参照・変更しない。\n"
+        "- 対象試験、Ruff、厳格Mypy、全pytest、厳密HEAD CIを実行する\n"
     )
 
 
@@ -248,30 +252,20 @@ def _severity(event: LoopHealthEvent) -> ImprovementSeverity:
 
 
 def _event_rank(event: LoopHealthEvent) -> tuple[int, int, str, str]:
-    severity = _severity(event)
     priority = {
         ImprovementSeverity.P0: 0,
         ImprovementSeverity.P1: 1,
         ImprovementSeverity.P2: 2,
-    }[severity]
+    }[_severity(event)]
     return (priority, -event.occurrence_count, event.kind.value, event.fingerprint)
 
 
 def _problem(event: LoopHealthEvent) -> str:
-    fingerprint = _redacted_reference(event.fingerprint)
     return (
-        f"`{event.kind.value}`が同一の健全性指紋（fingerprint）`{fingerprint}`で"
-        f"{event.occurrence_count}回観測されました。"
-        "通常実行を停止して人間が後追い保守するのではなく、原因をLoop Engineering自身の"
-        "改善Workとして解消します。"
+        f"`{event.kind.value}` が {event.occurrence_count} 回観測されました。"
+        "同じ原因を通常のLoopで自動回復できるようにしてください。"
     )
 
 
 def _redacted_reference(value: str) -> str:
-    """信頼できない健全性管理情報を、上限付きの不透明identityへ変換して返す。
-
-    健全性接続層は任意の外部文章を観測し得る。文字種許可方式では一般的な認証情報文字列も
-    許可対象になり得るため、秘密情報の安全性を保証できない。Issue本文には不可逆ハッシュを
-    通じた相関情報だけを残す。
-    """
     return durable_identity(value)

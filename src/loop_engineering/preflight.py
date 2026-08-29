@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Protocol
 from urllib.parse import urlsplit
 
+from .config import LoopEngineConfig
+
 
 class PreflightStatus(str, Enum):
     PASS = "PASS"
@@ -29,7 +31,9 @@ class CommandResult:
 
 class CommandRunner(Protocol):
     def run(
-        self, command: Sequence[str], environment: Mapping[str, str] | None = None
+        self,
+        command: Sequence[str],
+        environment: Mapping[str, str] | None = None,
     ) -> CommandResult: ...
 
 
@@ -39,7 +43,9 @@ class SubprocessCommandRunner:
     _TIMEOUT_SECONDS = 10
 
     def run(
-        self, command: Sequence[str], environment: Mapping[str, str] | None = None
+        self,
+        command: Sequence[str],
+        environment: Mapping[str, str] | None = None,
     ) -> CommandResult:
         try:
             result = subprocess.run(
@@ -60,13 +66,13 @@ class SubprocessCommandRunner:
 
 
 class TrustedReviewerBrokerProbe(Protocol):
-    """信頼済みホスト仲介器が提供する、秘密情報を含まない健全性接続口を確認する。"""
+    """信頼済みホスト仲介器の秘密情報を含まない健全性接続口を確認する。"""
 
     def check(self, socket_path: str, timeout_seconds: float) -> bool: ...
 
 
 class UnixSocketTrustedReviewerBrokerProbe:
-    """ホスト側仲介器へ、認証情報を含まない上限付き要求を送信する。"""
+    """ホスト側仲介器へ認証情報を含まない上限付き要求を送信する。"""
 
     _MAX_RESPONSE_BYTES = 4096
 
@@ -101,21 +107,16 @@ class PreflightResult:
 
 
 class EnvironmentCapabilityPreflight:
-    _REPOSITORY = "ktan514/ai-liver-yura"
-    _PROJECT_OWNER = "ktan514"
-    _PROJECT_NUMBER = "7"
-    _PROJECT_WRITE_QUERY = (
-        'query { user(login: "ktan514") { projectV2(number: 7) { viewerCanUpdate } } }'
-    )
-
     def __init__(
         self,
+        config: LoopEngineConfig,
         runner: CommandRunner,
         environment: Mapping[str, str] | None = None,
         *,
         reviewer_probe: TrustedReviewerBrokerProbe | None = None,
         project_root: Path | None = None,
     ) -> None:
+        self._config = config
         self._runner = runner
         self._environment = environment if environment is not None else os.environ
         self._reviewer_probe = reviewer_probe or UnixSocketTrustedReviewerBrokerProbe()
@@ -128,7 +129,7 @@ class EnvironmentCapabilityPreflight:
         capability["github_project_write"] = self._project_write_allowed()
         capability["mission_goal"] = self._mission_goal_matches()
         capability["project_venv"] = sys.prefix != sys.base_prefix
-        capability["openai_reviewer"] = self._reviewer_available()
+        capability["trusted_reviewer"] = self._reviewer_available()
         capability.update(self._postgresql_capabilities())
         blocking_names = (
             "github_cli",
@@ -146,7 +147,7 @@ class EnvironmentCapabilityPreflight:
             "codex_cli",
         )
         scoped_names = (
-            "openai_reviewer",
+            "trusted_reviewer",
             "docker",
             "postgresql_client",
             "postgresql_server",
@@ -163,17 +164,37 @@ class EnvironmentCapabilityPreflight:
             else PreflightStatus.PASS
         )
         return PreflightResult(
-            status, capability, blocking, scoped, blocking + scoped + tuple(self._timeouts)
+            status,
+            capability,
+            blocking,
+            scoped,
+            blocking + scoped + tuple(self._timeouts),
         )
 
     def _command_capabilities(self) -> dict[str, bool]:
+        project = str(self._config.project_number)
+        owner = self._config.owner
         python = (sys.executable, "--version")
         probes = {
             "github_cli": ("gh", "auth", "status"),
-            "github_repo_read": ("gh", "repo", "view", self._REPOSITORY),
-            "github_project_view": ("gh", "project", "view", "7", "--owner", "ktan514"),
-            "github_project_fields": ("gh", "project", "field-list", "7", "--owner", "ktan514"),
-            "github_project_items": ("gh", "project", "item-list", "7", "--owner", "ktan514"),
+            "github_repo_read": ("gh", "repo", "view", self._config.repository),
+            "github_project_view": ("gh", "project", "view", project, "--owner", owner),
+            "github_project_fields": (
+                "gh",
+                "project",
+                "field-list",
+                project,
+                "--owner",
+                owner,
+            ),
+            "github_project_items": (
+                "gh",
+                "project",
+                "item-list",
+                project,
+                "--owner",
+                owner,
+            ),
             "python": python,
             "pytest": (sys.executable, "-m", "pytest", "--version"),
             "ruff": (sys.executable, "-m", "ruff", "--version"),
@@ -183,16 +204,23 @@ class EnvironmentCapabilityPreflight:
             "docker": ("docker", "version"),
             "postgresql_client": ("psql", "--version"),
         }
-        capability = {name: self._run(name, command).succeeded for name, command in probes.items()}
+        capability = {
+            name: self._run(name, command).succeeded for name, command in probes.items()
+        }
         capability["github_project_read"] = all(
             capability.pop(name)
-            for name in ("github_project_view", "github_project_fields", "github_project_items")
+            for name in (
+                "github_project_view",
+                "github_project_fields",
+                "github_project_items",
+            )
         )
         return capability
 
     def _repository_write_allowed(self) -> bool:
         result = self._run(
-            "github_repo_write", ("gh", "api", f"repos/{self._REPOSITORY}")
+            "github_repo_write",
+            ("gh", "api", f"repos/{self._config.repository}"),
         )
         try:
             return result.succeeded and bool(json.loads(result.output)["permissions"]["push"])
@@ -200,9 +228,16 @@ class EnvironmentCapabilityPreflight:
             return False
 
     def _project_write_allowed(self) -> bool:
+        query = (
+            "query { user(login: "
+            f'"{self._config.owner}"'
+            ") { projectV2(number: "
+            f"{self._config.project_number}"
+            ") { viewerCanUpdate } } }"
+        )
         result = self._run(
             "github_project_write",
-            ("gh", "api", "graphql", "-f", f"query={self._PROJECT_WRITE_QUERY}"),
+            ("gh", "api", "graphql", "-f", f"query={query}"),
         )
         try:
             return result.succeeded and bool(
@@ -212,32 +247,20 @@ class EnvironmentCapabilityPreflight:
             return False
 
     def _reviewer_available(self) -> bool:
-        socket_path = self._environment.get("YURA_TRUSTED_REVIEWER_SOCKET")
+        socket_path = self._environment.get("LOOP_TRUSTED_REVIEWER_SOCKET")
         return bool(socket_path and self._reviewer_probe.check(socket_path, 10.0))
 
     def _postgresql_capabilities(self) -> dict[str, bool]:
         url = self._environment.get("LOOP_DATABASE_URL")
         if not url:
-            return {
-                "postgresql_server": False,
-                "postgresql_database": False,
-                "postgresql_migration": False,
-            }
+            return self._empty_database_capabilities()
         parsed = urlsplit(url)
         if parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname:
-            return {
-                "postgresql_server": False,
-                "postgresql_database": False,
-                "postgresql_migration": False,
-            }
+            return self._empty_database_capabilities()
         try:
             port = parsed.port
         except ValueError:
-            return {
-                "postgresql_server": False,
-                "postgresql_database": False,
-                "postgresql_migration": False,
-            }
+            return self._empty_database_capabilities()
         database_env = {
             "PATH": self._environment.get("PATH", os.defpath),
             "PGHOST": parsed.hostname,
@@ -247,23 +270,32 @@ class EnvironmentCapabilityPreflight:
             "PGDATABASE": parsed.path.lstrip("/"),
         }
         server = self._run("postgresql_server", ("pg_isready",), database_env).succeeded
-        database = (
-            server
-            and self._run(
-                "postgresql_database", ("psql", "-Atqc", "SELECT 1"), database_env
-            ).succeeded
-        )
+        database = server and self._run(
+            "postgresql_database",
+            ("psql", "-Atqc", "SELECT 1"),
+            database_env,
+        ).succeeded
         migration = (
             database
             and (self._project_root / "alembic.ini").is_file()
             and self._run(
-                "postgresql_migration", (sys.executable, "-m", "alembic", "current"), database_env
+                "postgresql_migration",
+                (sys.executable, "-m", "alembic", "current"),
+                database_env,
             ).succeeded
         )
         return {
             "postgresql_server": server,
             "postgresql_database": database,
             "postgresql_migration": migration,
+        }
+
+    @staticmethod
+    def _empty_database_capabilities() -> dict[str, bool]:
+        return {
+            "postgresql_server": False,
+            "postgresql_database": False,
+            "postgresql_migration": False,
         }
 
     def _mission_goal_matches(self) -> bool:
@@ -282,7 +314,10 @@ class EnvironmentCapabilityPreflight:
         )
 
     def _run(
-        self, name: str, command: Sequence[str], environment: Mapping[str, str] | None = None
+        self,
+        name: str,
+        command: Sequence[str],
+        environment: Mapping[str, str] | None = None,
     ) -> CommandResult:
         result = self._runner.run(command, environment)
         if result.timed_out:
@@ -291,7 +326,10 @@ class EnvironmentCapabilityPreflight:
 
 
 def main() -> None:
-    print(EnvironmentCapabilityPreflight(SubprocessCommandRunner()).run().as_json())
+    config = LoopEngineConfig.from_environment()
+    print(
+        EnvironmentCapabilityPreflight(config, SubprocessCommandRunner()).run().as_json()
+    )
 
 
 if __name__ == "__main__":

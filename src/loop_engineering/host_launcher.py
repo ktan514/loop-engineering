@@ -17,7 +17,7 @@ class GitHubCredentialUnavailable(RuntimeError):
 
 
 class EnvironmentSecretProvider:
-    """ホストプロセス環境へ既に注入された認証情報を読み取る。"""
+    """ホストプロセス環境へ既に注入された認証情報だけを読み取る。"""
 
     def __init__(self, values: Mapping[str, str]) -> None:
         self._values = values
@@ -40,27 +40,62 @@ class LaunchEnvironment:
     values: Mapping[str, str]
 
 
+_NON_SECRET_LOOP_KEYS = (
+    "LOOP_REPOSITORY",
+    "LOOP_PROJECT_OWNER",
+    "LOOP_PROJECT_NUMBER",
+    "LOOP_MISSION_ISSUE",
+    "LOOP_LABEL",
+    "LOOP_TRUNK_BRANCH",
+    "LOOP_AUTHORITY_REFS",
+    "LOOP_IMPROVEMENT_AREA",
+    "LOOP_ISSUE_LEVEL",
+    "LOOP_ROOT_ISSUE",
+    "LOOP_PARENT_ISSUE",
+    "LOOP_INTEGRATION_WORK",
+    "LOOP_CI_WORKFLOW_NAME",
+    "LOOP_TRUSTED_REVIEWER_SOCKET",
+    "LOOP_CODEX_COMMAND_JSON",
+)
+
+
 def build_launch_environment(
-    root: Path, secrets: SecretProvider, parent: Mapping[str, str]
+    root: Path,
+    secrets: SecretProvider,
+    parent: Mapping[str, str],
 ) -> LaunchEnvironment:
     goal = root / "docs" / "operations" / "loop_mission_goal.md"
     content = goal.read_bytes()
     lines = content.decode("utf-8").splitlines()
-    version = next(line.removeprefix("version: ") for line in lines if line.startswith("version: "))
+    version = next(
+        line.removeprefix("version: ")
+        for line in lines
+        if line.startswith("version: ")
+    )
     generation = next(
-        line.removeprefix("generation: ") for line in lines if line.startswith("generation: ")
+        line.removeprefix("generation: ")
+        for line in lines
+        if line.startswith("generation: ")
     )
     path = parent.get("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
-    return LaunchEnvironment(
-        {
-            "PATH": path,
-            "GH_TOKEN": secrets.github_token(),
-            "CODEX_MISSION_GOAL_VERSION": version,
-            "CODEX_MISSION_GOAL_GENERATION": generation,
-            "CODEX_MISSION_GOAL_SHA256": hashlib.sha256(content).hexdigest(),
-        }
-    )
+    values: dict[str, str] = {
+        "PATH": path,
+        "GH_TOKEN": secrets.github_token(),
+        "CODEX_MISSION_GOAL_VERSION": version,
+        "CODEX_MISSION_GOAL_GENERATION": generation,
+        "CODEX_MISSION_GOAL_SHA256": hashlib.sha256(content).hexdigest(),
+    }
+    for name in _NON_SECRET_LOOP_KEYS:
+        value = parent.get(name)
+        if value:
+            values[name] = value
+    return LaunchEnvironment(values)
 
 
 def launch_vscode(root: Path, environment: LaunchEnvironment) -> None:
-    subprocess.run(("code", str(root)), check=True, env=dict(environment.values), timeout=30)
+    subprocess.run(
+        ("code", str(root)),
+        check=True,
+        env=dict(environment.values),
+        timeout=30,
+    )

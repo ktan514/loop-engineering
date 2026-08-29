@@ -1,4 +1,4 @@
-"""Loop Engineを実ホストへ安全に接続する入口。"""
+"""Loop Engineeringを実ホストへ安全に接続する入口。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import cast
 
 from .ci_gate import CIGateStatus
+from .config import LoopEngineConfig
 from .host_runtime import (
     CodexImplementer,
     GhMissionPort,
@@ -29,8 +30,6 @@ from .preflight import (
 )
 from .trusted_worktree import TrustedWorktree
 
-_INTEGRATION_WORK = 471
-_MISSION_ISSUE = 450
 _CURRENT_WORK_RE = re.compile(
     r"(?im)^.*?current\s+Work(?:\s*/\s*Integration)?\s*:\s*`?#?(\d+)"
 )
@@ -45,12 +44,17 @@ _EXACT_HEAD_RE = re.compile(
 class StrictGhMissionPort(GhMissionPort):
     """最新のMission Checkpointだけを採用し、古い対象へ戻らない。"""
 
-    def __init__(self, runner: LocalRunner, environment: Mapping[str, str]) -> None:
-        super().__init__(runner, environment)
+    def __init__(
+        self,
+        config: LoopEngineConfig,
+        runner: LocalRunner,
+        environment: Mapping[str, str],
+    ) -> None:
+        super().__init__(config, runner, environment)
         self._merge_conflict_target: tuple[int, int, str] | None = None
 
     def _checkpoint_candidate(self) -> tuple[int, int | None, str | None, int] | None:
-        comments = self._issue_comments(_MISSION_ISSUE)
+        comments = self._issue_comments(self.config.mission_issue)
         latest_checkpoint: dict[str, object] | None = None
         for comment in reversed(comments):
             body = comment.get("body")
@@ -84,11 +88,9 @@ class StrictGhMissionPort(GhMissionPort):
         if self._pull_requires_reconciliation(target):
             self._remember_merge_conflict(target)
             return False
-
         merged = super().merge_current(target)
         if merged:
             return True
-
         if self._pull_requires_reconciliation(target):
             self._remember_merge_conflict(target)
         return False
@@ -105,12 +107,13 @@ class StrictGhMissionPort(GhMissionPort):
     def _pull_requires_reconciliation(self, target: HostTarget) -> bool:
         if target.pr_number is None or target.head_sha is None:
             return False
-        pull = self._api_json(f"repos/ktan514/ai-liver-yura/pulls/{target.pr_number}")
+        pull = self._api_json(
+            f"repos/{self.config.repository}/pulls/{target.pr_number}"
+        )
         head_value = pull.get("head")
         if not isinstance(head_value, dict) or head_value.get("sha") != target.head_sha:
             return False
-        mergeable_state = pull.get("mergeable_state")
-        return pull.get("mergeable") is False or mergeable_state == "dirty"
+        return pull.get("mergeable") is False or pull.get("mergeable_state") == "dirty"
 
     def _remember_merge_conflict(self, target: HostTarget) -> None:
         assert target.pr_number is not None
@@ -123,9 +126,10 @@ class StrictGhMissionPort(GhMissionPort):
 
 
 class PilotAwareMissionPort(MissionPort):
-    """#471の基盤統合後も、実製品作業の試験完了までは統合Issueを開いたままにする。"""
+    """任意の統合Workを、実製品試験完了までopenのまま維持できる接続層。"""
 
-    def __init__(self, delegate: MissionPort) -> None:
+    def __init__(self, config: LoopEngineConfig, delegate: MissionPort) -> None:
+        self._config = config
         self._delegate = delegate
         self._bootstrap_target: HostTarget | None = None
 
@@ -144,7 +148,10 @@ class PilotAwareMissionPort(MissionPort):
         return self._delegate.merge_requires_reconciliation(target)
 
     def complete_work(self, target: HostTarget) -> bool:
-        if target.work_issue == _INTEGRATION_WORK:
+        if (
+            self._config.integration_work is not None
+            and target.work_issue == self._config.integration_work
+        ):
             self._bootstrap_target = target
             return True
         return self._delegate.complete_work(target)
@@ -165,10 +172,11 @@ class PilotAwareMissionPort(MissionPort):
             f"- current Work: #{target.work_issue}\n"
             f"{pr_line}"
             f"{head_line}"
-            "- #477 基盤統合: mergeとGitHub再確認は完了\n"
-            "- #471 状態: openのまま実製品Workの試験証拠を待つ\n"
-            "- next action: Project #7とGitHub liveから実製品の試験対象Workを1件fresh選択する\n"
-            "- review policy: 非機能の指摘と`NOT_RUN`は停止条件にしない"
+            "- 基盤統合: mergeとGitHub再確認は完了\n"
+            "- 統合Work状態: openのまま実製品Workの試験証拠を待つ\n"
+            f"- next action: Project #{self._config.project_number}とGitHub liveから"
+            "実製品の試験対象Workを1件fresh選択する\n"
+            "- review policy: 非機能の指摘と`NOT_RUN`だけを停止条件にしない"
         )
         return self._delegate.publish_checkpoint(checkpoint)
 
@@ -178,13 +186,15 @@ class PilotPlanningImplementer(CodexImplementer):
 
     def __init__(
         self,
+        config: LoopEngineConfig,
         runner: LocalRunner,
         root: Path,
         environment: Mapping[str, str],
         argv_prefix: Sequence[str],
     ) -> None:
-        super().__init__(runner, root, environment, argv_prefix)
-        self._trusted_worktree = TrustedWorktree(runner, root, environment)
+        super().__init__(config, runner, root, environment, argv_prefix)
+        self._config = config
+        self._trusted_worktree = TrustedWorktree(config, runner, root, environment)
 
     def continue_work(self, target: HostTarget, *, repair: bool) -> bool:
         prepared = self._trusted_worktree.prepare(target)
@@ -197,9 +207,7 @@ class PilotPlanningImplementer(CodexImplementer):
                 "競合箇所をRepository正本に従って解消してください。"
             )
         elif repair:
-            task = (
-                "現在のexact HEADで実際に動作を妨げている不具合だけを修正してください。"
-            )
+            task = "現在の厳密HEADで実際に動作を妨げている不具合だけを修正してください。"
         else:
             task = "現在Workの次の実装工程を1回分だけ進めてください。"
 
@@ -208,22 +216,21 @@ class PilotPlanningImplementer(CodexImplementer):
             if target.pr_number is not None
             else "まだPRがない現在Work"
         )
+        authority = ", ".join(self._config.authority_refs) or self._config.repository
         instruction = (
-            f"Mission #450 / Parent #462 の current Work #{target.work_issue}（{pr_text}）を"
+            f"Authority {authority} の current Work #{target.work_issue}（{pr_text}）を"
             "1回分の限定された遷移として進めます。"
             f"{task}"
             "GitHubの現在状態、最新Mission Checkpoint、現在基幹、Repository正本、"
-            "Work固有の再開確認（Resume Gate）と依存状態をfresh readしてください。"
+            "Work固有の再開確認と依存状態をfresh readしてください。"
             "設計→コード→テストの順序を守ってください。"
-            "コードや文書内の人間向け文章は日本語で記述し、英語の概念名が必要な場合は"
-            "自然な日本語の意味表現を先に書いてから原語を括弧内へ併記してください。"
+            "コードや文書内の人間向け文章は日本語で記述してください。"
             "Gitのbranch作成・切替・merge・add・commit・push・rebase・force pushは"
-            "実行しないでください。Git metadataの変更は信頼済みホストが担当します。"
+            "実行しないでください。Git管理情報の変更は信頼済みホストが担当します。"
             "GitHubへのIssue/PR/Checkpoint等の書込みも行わないでください。"
-            "ファイル編集と必要な機械検査（machine gate）だけを実施し、"
-            "変更は作業領域（worktree）へ未コミットで残してください。"
-            "正本レビュー（canonical review）の非機能指摘やprovider `NOT_RUN`を理由に停止せず、"
-            "Project #6の変更とreviewer credential利用は禁止です。"
+            "ファイル編集と必要な機械検査だけを実施し、変更は作業領域へ未commitで残してください。"
+            "正本レビューの非機能指摘や提供元`NOT_RUN`だけを理由に停止せず、"
+            "設定外Projectの変更とレビューワー認証情報利用は禁止です。"
         )
         if not self._run_codex(instruction):
             self._trusted_worktree.abort_merge_if_needed(prepared)
@@ -232,36 +239,39 @@ class PilotPlanningImplementer(CodexImplementer):
         return finalized is not None
 
     def plan_next_work(self, completed_work: int | None) -> bool:
-        if completed_work != _INTEGRATION_WORK:
+        integration = self._config.integration_work
+        if integration is None or completed_work != integration:
             return super().plan_next_work(completed_work)
+        authority = ", ".join(self._config.authority_refs) or self._config.repository
         instruction = (
-            "Mission #450の実製品試験対象を選択する計画専用の遷移です。"
-            "Loop Engineeringの基盤統合 #471/#477は基幹へ統合済みです。"
-            "#471は実製品試験の証拠待ちでopenのままです。"
-            "#207/#317/#450/#462、Project #7、GitHub上の現在Issue/PRをfresh readし、"
-            "依存関係を満たしたV2製品Workまたは統合Workを1件選択してください。"
-            "#462/#471自身とLoop Engineering基盤責務のIssueは試験候補から除外してください。"
+            f"Authority {authority} の実製品試験対象を選択する計画専用遷移です。"
+            f"統合Work #{integration} は基盤統合後の実製品試験証拠待ちです。"
+            f"Project #{self._config.project_number}とGitHub上の現在Issue/PRをfresh readし、"
+            "依存関係を満たした製品Workまたは統合Workを1件選択してください。"
+            f"#{integration}自身とLoop Engineering基盤責務は試験候補から除外してください。"
             "依存関係を満たした製品Workが無い場合は、外部または依存待ちをCheckpointへ明示してください。"
-            "Repositoryのコード・設計file・branch・PRを変更せず、mergeやreviewも実行しないでください。"
-            "選択したWorkは必ずliteral field `- current Work: #<issue>` で記録してください。"
-            "active PRが存在する場合は `- current PR: #<pr>` と"
-            " `- exact HEAD: <40-hex-sha>` も記録してください。"
+            "Repositoryコード・設計file・branch・PRを変更せず、mergeやreviewも実行しないでください。"
+            "選択したWorkは必ず固定項目`- current Work: #<issue>`で記録してください。"
+            "active PRが存在する場合は`- current PR: #<pr>`と"
+            "`- exact HEAD: <40-hex-sha>`も記録してください。"
             "active PRが無い場合はPR/HEADを捏造せず省略してください。"
-            "#450へ日本語のMission Checkpointを1回だけ記録してください。"
-            "Root #317の完成をlive evidenceで証明できない限りMISSION_COMPLETEにしないでください。"
+            f"Mission Issue #{self._config.mission_issue}へ日本語のMission Checkpointを1回だけ記録してください。"
+            "Mission完了をlive evidenceで証明できない限り`MISSION_COMPLETE`にしないでください。"
         )
         return self._run_codex(instruction)
 
 
 class ReconciliationAwareHostLoopController(HostLoopController):
-    """merge競合と#471の実製品試験計画を限定された遷移へ振り分ける。"""
+    """merge競合と任意の実製品試験計画を限定遷移へ振り分ける。"""
 
     def __init__(
         self,
+        config: LoopEngineConfig,
         mission: PilotAwareMissionPort,
         implementer: PilotPlanningImplementer,
     ) -> None:
-        super().__init__(mission, implementer)
+        super().__init__(config, mission, implementer)
+        self._config = config
         self._reconciliation_mission = mission
         self._reconciliation_implementer = implementer
 
@@ -271,9 +281,11 @@ class ReconciliationAwareHostLoopController(HostLoopController):
         except RuntimeError:
             initial_target = None
 
+        integration = self._config.integration_work
         if (
-            initial_target is not None
-            and initial_target.work_issue == _INTEGRATION_WORK
+            integration is not None
+            and initial_target is not None
+            and initial_target.work_issue == integration
             and initial_target.issue_open
             and initial_target.pr_number is None
         ):
@@ -300,8 +312,10 @@ class ReconciliationAwareHostLoopController(HostLoopController):
         return result
 
     def _run_pilot_planning(self, target: HostTarget) -> HostTransitionResult:
+        integration = self._config.integration_work
+        assert integration is not None
         before_checkpoint = target.checkpoint_comment_id
-        if not self._reconciliation_implementer.plan_next_work(_INTEGRATION_WORK):
+        if not self._reconciliation_implementer.plan_next_work(integration):
             return HostTransitionResult(
                 HostTransitionStatus.INTERVENTION_REQUIRED,
                 "PILOT_PLANNING_UNAVAILABLE",
@@ -317,7 +331,7 @@ class ReconciliationAwareHostLoopController(HostLoopController):
                 "PILOT_PLANNING_NO_PROGRESS",
                 target.work_issue,
             )
-        if fresh.work_issue == _INTEGRATION_WORK:
+        if fresh.work_issue == integration:
             return HostTransitionResult(
                 HostTransitionStatus.YIELD_EXTERNAL,
                 "PILOT_DEPENDENCY_WAIT",
@@ -332,7 +346,8 @@ class ReconciliationAwareHostLoopController(HostLoopController):
         )
 
     def _run_merge_reconciliation(
-        self, result: HostTransitionResult
+        self,
+        result: HostTransitionResult,
     ) -> HostTransitionResult:
         try:
             target = self._reconciliation_mission.current_target()
@@ -400,11 +415,22 @@ def run_actual_host_transition(
     root: Path | None = None,
     environment: Mapping[str, str] | None = None,
     local_runner: LocalRunner | None = None,
+    config: LoopEngineConfig | None = None,
 ) -> HostTransitionResult:
     project_root = root or Path(__file__).resolve().parents[2]
     values = _canonical_goal_environment(project_root, environment or os.environ)
+    try:
+        resolved_config = config or LoopEngineConfig.from_environment(values)
+    except ValueError:
+        return HostTransitionResult(
+            HostTransitionStatus.INTERVENTION_REQUIRED,
+            "CONFIGURATION_INVALID",
+        )
     preflight = EnvironmentCapabilityPreflight(
-        SubprocessCommandRunner(), values, project_root=project_root
+        resolved_config,
+        SubprocessCommandRunner(),
+        values,
+        project_root=project_root,
     ).run()
     if preflight.status is PreflightStatus.BLOCKED:
         return HostTransitionResult(
@@ -421,13 +447,25 @@ def run_actual_host_transition(
             "CODEX_COMMAND_INVALID",
         )
 
-    mission = PilotAwareMissionPort(StrictGhMissionPort(runner, values))
-    implementer = PilotPlanningImplementer(runner, project_root, values, argv_prefix)
-    return ReconciliationAwareHostLoopController(mission, implementer).run_once()
+    strict = StrictGhMissionPort(resolved_config, runner, values)
+    mission = PilotAwareMissionPort(resolved_config, strict)
+    implementer = PilotPlanningImplementer(
+        resolved_config,
+        runner,
+        project_root,
+        values,
+        argv_prefix,
+    )
+    return ReconciliationAwareHostLoopController(
+        resolved_config,
+        mission,
+        implementer,
+    ).run_once()
 
 
 def _canonical_goal_environment(
-    root: Path, environment: Mapping[str, str]
+    root: Path,
+    environment: Mapping[str, str],
 ) -> dict[str, str]:
     values = dict(environment)
     goal = root / "docs" / "operations" / "loop_mission_goal.md"

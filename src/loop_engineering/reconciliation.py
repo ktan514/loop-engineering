@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+from .config import LoopEngineConfig
 from .models import ConflictKind, LineageClassification, ObservationEpoch
 
-_PROJECT_NUMBER = 7
 
-
-def reconcile_global(epoch: ObservationEpoch) -> tuple[ConflictKind, ...]:
+def reconcile_global(
+    epoch: ObservationEpoch,
+    config: LoopEngineConfig,
+) -> tuple[ConflictKind, ...]:
     conflicts: list[ConflictKind] = []
     if not epoch.authorities_available:
         conflicts.append(ConflictKind.AUTHORITY_UNAVAILABLE)
-    if epoch.project_number != _PROJECT_NUMBER:
+    if epoch.project_number != config.project_number:
         conflicts.append(ConflictKind.FORBIDDEN_PROJECT_IDENTITY)
     elif not epoch.project_available:
         conflicts.append(ConflictKind.PROJECT_AUTHORITY_UNAVAILABLE)
@@ -49,9 +51,9 @@ def reconcile_work(epoch: ObservationEpoch, issue_number: int) -> tuple[Conflict
     return tuple(dict.fromkeys(conflicts))
 
 
-def reconcile(epoch: ObservationEpoch) -> tuple[ConflictKind, ...]:
+def reconcile(epoch: ObservationEpoch, config: LoopEngineConfig) -> tuple[ConflictKind, ...]:
     """報告用の集約結果を返す。作業選択では対象範囲別の関数を使用する。"""
-    conflicts = list(reconcile_global(epoch))
+    conflicts = list(reconcile_global(epoch, config))
     for work in epoch.works:
         conflicts.extend(reconcile_work(epoch, work.issue_number))
     return tuple(dict.fromkeys(conflicts))

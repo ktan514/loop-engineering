@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from .config import LoopEngineConfig
 from .health import marker, render_issue_body
 from .models import (
     ConflictKind,
@@ -22,12 +23,6 @@ from .models import (
     WriteIntent,
 )
 from .write_gate import validate
-
-_REPOSITORY = "ktan514/ai-liver-yura"
-_OWNER = "ktan514"
-_PROJECT_NUMBER = 7
-_LABEL = "loop-engineering"
-_LOCK_DIRECTORY = Path(tempfile.gettempdir()) / "yura-loop-engine-improvement-locks"
 
 
 class CommandRunner(Protocol):
@@ -53,6 +48,7 @@ class SubprocessCommandRunner:
 
 @dataclass(slots=True)
 class GitHubImprovementIssuePublisher:
+    config: LoopEngineConfig
     runner: CommandRunner
 
     def publish(self, intent: ImprovementIssueIntent) -> ImprovementPublishResult:
@@ -66,17 +62,17 @@ class GitHubImprovementIssuePublisher:
                         "issue",
                         "create",
                         "--repo",
-                        _REPOSITORY,
+                        self.config.repository,
                         "--title",
                         intent.candidate.title,
                         "--body",
-                        render_issue_body(intent.candidate),
+                        render_issue_body(intent.candidate, self.config),
                         "--label",
-                        _LABEL,
+                        self.config.label,
                     )
                 )
                 issue_number = _issue_number(created_issue_url.strip())
-                issue_url = _web_issue_url(issue_number)
+                issue_url = self._web_issue_url(issue_number)
                 created = True
             else:
                 issue_number, issue_url = existing
@@ -92,7 +88,8 @@ class GitHubImprovementIssuePublisher:
                 "api",
                 "--paginate",
                 "--slurp",
-                f"repos/{_REPOSITORY}/issues?state=open&labels={_LABEL}&per_page=100",
+                f"repos/{self.config.repository}/issues?state=open&labels="
+                f"{self.config.label}&per_page=100",
             )
         )
         for item in _object_pages(raw):
@@ -100,7 +97,7 @@ class GitHubImprovementIssuePublisher:
             if marker(improvement_key) not in body:
                 continue
             number = _integer(item.get("number"), "issue.number")
-            return number, _web_issue_url(number)
+            return number, self._web_issue_url(number)
         return None
 
     def _ensure_project_configuration(
@@ -108,22 +105,8 @@ class GitHubImprovementIssuePublisher:
         issue_url: str,
         intent: ImprovementIssueIntent,
     ) -> None:
-        project = _object(
-            self.runner.run(
-                (
-                    "gh",
-                    "project",
-                    "view",
-                    str(_PROJECT_NUMBER),
-                    "--owner",
-                    _OWNER,
-                    "--format",
-                    "json",
-                )
-            )
-        )
+        project = self._project()
         project_id = _string(project.get("id"), "project.id")
-
         item_id = self._project_item_id(issue_url)
         if item_id is None:
             self._require_item_add_gate(project_id, issue_url)
@@ -133,9 +116,9 @@ class GitHubImprovementIssuePublisher:
                         "gh",
                         "project",
                         "item-add",
-                        str(_PROJECT_NUMBER),
+                        str(self.config.project_number),
                         "--owner",
-                        _OWNER,
+                        self.config.owner,
                         "--url",
                         issue_url,
                         "--format",
@@ -144,19 +127,18 @@ class GitHubImprovementIssuePublisher:
                 )
             )
             item_id = _string(added.get("id"), "project_item.id")
-            readback_item_id = self._project_item_id(issue_url)
             self._require_write_gate(
                 WriteIntent(
                     "improvement-project-item-add-effect",
                     "project",
-                    str(_PROJECT_NUMBER),
+                    str(self.config.project_number),
                     "verify_effect",
                     (),
                     (("item_id", item_id),),
                     "publisher-live-readback",
                 ),
                 {},
-                {"item_id": readback_item_id or ""},
+                {"item_id": self._project_item_id(issue_url) or ""},
             )
 
         fields = self._fields()
@@ -171,12 +153,13 @@ class GitHubImprovementIssuePublisher:
                 field_name,
                 value,
             )
+
         readback = self._project_field_values(issue_url)
         self._require_write_gate(
             WriteIntent(
                 "improvement-project-effect",
                 "project",
-                str(_PROJECT_NUMBER),
+                str(self.config.project_number),
                 "verify_effect",
                 (),
                 tuple(
@@ -190,19 +173,14 @@ class GitHubImprovementIssuePublisher:
         )
 
     def _fresh_configuration_snapshot(
-        self, issue_url: str, intent: ImprovementIssueIntent
+        self,
+        issue_url: str,
+        intent: ImprovementIssueIntent,
     ) -> tuple[str, str, dict[str, dict[str, object]], dict[str, str]]:
-        project = _object(
-            self.runner.run(
-                (
-                    "gh", "project", "view", str(_PROJECT_NUMBER), "--owner", _OWNER,
-                    "--format", "json",
-                )
-            )
-        )
+        project = self._project()
         item_id = self._project_item_id(issue_url)
         if item_id is None:
-            raise ValueError("Project #7の項目が変更前に消失しました")
+            raise ValueError("Project項目が変更前に消失しました")
         project_id = _string(project.get("id"), "project.id")
         fields = self._fields()
         return (
@@ -227,7 +205,7 @@ class GitHubImprovementIssuePublisher:
             WriteIntent(
                 f"improvement-project-edit-{field_name}",
                 "project",
-                str(_PROJECT_NUMBER),
+                str(self.config.project_number),
                 "edit_improvement_field",
                 tuple(expected_preconditions.items()),
                 (),
@@ -243,7 +221,7 @@ class GitHubImprovementIssuePublisher:
             WriteIntent(
                 f"improvement-project-edit-{field_name}-effect",
                 "project",
-                str(_PROJECT_NUMBER),
+                str(self.config.project_number),
                 "verify_effect",
                 (),
                 ((f"value:{field_name}", value),),
@@ -257,20 +235,13 @@ class GitHubImprovementIssuePublisher:
         )
 
     def _require_item_add_gate(self, project_id: str, issue_url: str) -> None:
-        fresh_project = _object(
-            self.runner.run(
-                (
-                    "gh", "project", "view", str(_PROJECT_NUMBER), "--owner", _OWNER,
-                    "--format", "json",
-                )
-            )
-        )
+        fresh_project = self._project()
         fresh_item_id = self._project_item_id(issue_url)
         self._require_write_gate(
             WriteIntent(
                 "improvement-project-item-add",
                 "project",
-                str(_PROJECT_NUMBER),
+                str(self.config.project_number),
                 "add_improvement_item",
                 (("project_id", project_id), ("item_presence", "absent")),
                 (),
@@ -293,7 +264,9 @@ class GitHubImprovementIssuePublisher:
         result = {"project_id": project_id, "item_id": item_id}
         for field_name, option_name in values.items():
             field = _field(fields, field_name)
-            result[f"field:{field_name}"] = _string(field.get("id"), f"{field_name}.id")
+            result[f"field:{field_name}"] = _string(
+                field.get("id"), f"{field_name}.id"
+            )
             if field_name in {"Start date", "Target date"}:
                 continue
             options = field.get("options")
@@ -309,30 +282,42 @@ class GitHubImprovementIssuePublisher:
             )
             if option is None:
                 raise ValueError(f"{field_name}の選択肢を利用できません: {option_name}")
-            result[f"option:{field_name}"] = _string(option.get("id"), f"{field_name}.option.id")
+            result[f"option:{field_name}"] = _string(
+                option.get("id"), f"{field_name}.option.id"
+            )
         return result
 
-    @staticmethod
-    def _expected_values(intent: ImprovementIssueIntent) -> dict[str, str]:
-        return {
-            "Status": intent.status,
-            "Priority": intent.candidate.severity.value,
-            "Area": intent.area,
-            "Issue level": intent.issue_level,
-            "Start date": intent.candidate.start_date,
-            "Target date": intent.candidate.target_date,
-        }
-
-    @staticmethod
     def _require_write_gate(
+        self,
         intent: WriteIntent,
         fresh_preconditions: dict[str, str],
         readback_effect: dict[str, str] | None = None,
     ) -> None:
-        result = validate(intent, fresh_preconditions, readback_effect)
+        result = validate(
+            intent,
+            fresh_preconditions,
+            readback_effect,
+            config=self.config,
+        )
         if not result.allowed:
             conflict = result.conflict or ConflictKind.STALE_WRITE_GATE
             raise ValueError(conflict.value)
+
+    def _project(self) -> dict[str, object]:
+        return _object(
+            self.runner.run(
+                (
+                    "gh",
+                    "project",
+                    "view",
+                    str(self.config.project_number),
+                    "--owner",
+                    self.config.owner,
+                    "--format",
+                    "json",
+                )
+            )
+        )
 
     def _project_item_id(self, issue_url: str) -> str | None:
         snapshot = self._project_item(issue_url)
@@ -345,9 +330,9 @@ class GitHubImprovementIssuePublisher:
                     "gh",
                     "project",
                     "item-list",
-                    str(_PROJECT_NUMBER),
+                    str(self.config.project_number),
                     "--owner",
-                    _OWNER,
+                    self.config.owner,
                     "--limit",
                     "100000",
                     "--format",
@@ -397,9 +382,9 @@ class GitHubImprovementIssuePublisher:
                     "gh",
                     "project",
                     "field-list",
-                    str(_PROJECT_NUMBER),
+                    str(self.config.project_number),
                     "--owner",
-                    _OWNER,
+                    self.config.owner,
                     "--format",
                     "json",
                 )
@@ -480,46 +465,55 @@ class GitHubImprovementIssuePublisher:
         )
 
     @staticmethod
-    def _validate_intent(intent: ImprovementIssueIntent) -> None:
-        if intent.repository != _REPOSITORY:
+    def _expected_values(intent: ImprovementIssueIntent) -> dict[str, str]:
+        return {
+            "Status": intent.status,
+            "Priority": intent.candidate.severity.value,
+            "Area": intent.area,
+            "Issue level": intent.issue_level,
+            "Start date": intent.candidate.start_date,
+            "Target date": intent.candidate.target_date,
+        }
+
+    def _validate_intent(self, intent: ImprovementIssueIntent) -> None:
+        if intent.repository != self.config.repository:
             raise ValueError("想定外のRepositoryです")
-        if intent.project_number != _PROJECT_NUMBER:
-            raise ValueError("Project #6および#7以外は変更禁止です")
-        if intent.label != _LABEL:
+        if intent.project_number != self.config.project_number:
+            raise ValueError("想定外のProjectです")
+        if intent.label != self.config.label:
             raise ValueError("想定外の改善ラベルです")
 
+    def _web_issue_url(self, number: int) -> str:
+        return f"https://github.com/{self.config.repository}/issues/{number}"
 
-def improvement_intent(candidate: ImprovementCandidate) -> ImprovementIssueIntent:
+
+def improvement_intent(
+    candidate: ImprovementCandidate,
+    config: LoopEngineConfig,
+) -> ImprovementIssueIntent:
     return ImprovementIssueIntent(
-        repository=_REPOSITORY,
-        project_number=_PROJECT_NUMBER,
-        label=_LABEL,
+        repository=config.repository,
+        project_number=config.project_number,
+        label=config.label,
         status="Ready",
-        area="Subsystem/Development Tooling",
-        issue_level="Work",
+        area=config.improvement_area,
+        issue_level=config.issue_level,
         candidate=candidate,
     )
 
 
-def _web_issue_url(number: int) -> str:
-    return f"https://github.com/{_REPOSITORY}/issues/{number}"
-
-
 @contextmanager
 def _improvement_lock(improvement_key: str) -> Iterator[None]:
-    """単一の信頼済み公開ホスト上で、同一keyの処理を直列化する。
-
-    #465では共有運用記憶を意図的に持たない。そのため、運用記憶が永続的な分散冪等性を
-    提供するまでは、複数ホストから同時公開する構成を許可しない。
-    """
+    """単一の信頼済み公開ホスト上で、同一keyの処理を直列化する。"""
     is_sha256 = len(improvement_key) == 64 and all(
         char in "0123456789abcdef" for char in improvement_key
     )
     if not is_sha256:
         raise ValueError("改善keyが不正です")
-    _LOCK_DIRECTORY.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chmod(_LOCK_DIRECTORY, 0o700)
-    path = _LOCK_DIRECTORY / f"{improvement_key}.lock"
+    directory = Path(tempfile.gettempdir()) / "loop-engineering-improvement-locks"
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(directory, 0o700)
+    path = directory / f"{improvement_key}.lock"
     with path.open("a", encoding="utf-8") as lock_file:
         os.chmod(path, 0o600)
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
@@ -543,19 +537,7 @@ def _object(raw: str) -> dict[str, object]:
     return value
 
 
-def _object_list(raw: str) -> list[dict[str, object]]:
-    value: object = json.loads(raw)
-    if not isinstance(value, list):
-        raise ValueError("JSON配列が必要です")
-    result: list[dict[str, object]] = []
-    for item in value:
-        if isinstance(item, dict):
-            result.append(item)
-    return result
-
-
 def _object_pages(raw: str) -> list[dict[str, object]]:
-    """`gh api --paginate --slurp`の全ページを件数上限なしで平坦化する。"""
     value: object = json.loads(raw)
     if not isinstance(value, list):
         raise ValueError("ページ分割JSON配列が必要です")
@@ -563,9 +545,7 @@ def _object_pages(raw: str) -> list[dict[str, object]]:
     for page in value:
         if not isinstance(page, list):
             raise ValueError("JSONページ配列が必要です")
-        for item in page:
-            if isinstance(item, dict):
-                result.append(item)
+        result.extend(item for item in page if isinstance(item, dict))
     return result
 
 
@@ -575,8 +555,8 @@ def _field(
 ) -> dict[str, object]:
     try:
         return fields[name]
-    except KeyError as exc:
-        raise ValueError(f"Project #7のfieldを利用できません: {name}") from exc
+    except KeyError as error:
+        raise ValueError(f"Projectのfieldを利用できません: {name}") from error
 
 
 def _string(value: object, name: str) -> str:

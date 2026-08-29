@@ -32,7 +32,7 @@ def main() -> int:
     )
     arguments = parser.parse_args()
     if arguments.version:
-        print("tools.loop_engine 1")
+        print("loop_engineering 1")
         return 0
     if arguments.validate_installation:
         print("LOOP_ENGINE_INSTALLATION=PASS")
