@@ -14,10 +14,19 @@ from .host_entrypoint import (
     ReconciliationAwareHostLoopController,
     StrictGhMissionPort,
 )
-from .host_runtime import HostTransitionResult, HostTransitionStatus, LocalRunner, SubprocessLocalRunner
+from .host_runtime import (
+    HostTransitionResult,
+    HostTransitionStatus,
+    LocalRunner,
+    SubprocessLocalRunner,
+)
 from .mission_goal import inject_mission_goal_environment
 from .postgres_runtime import PostgreSQLCommandAdapter
-from .preflight import EnvironmentCapabilityPreflight, PreflightStatus, SubprocessCommandRunner
+from .preflight import (
+    EnvironmentCapabilityPreflight,
+    PreflightStatus,
+    SubprocessCommandRunner,
+)
 from .runtime_operational_state import (
     DurableHostTransitionCoordinator,
     PostgreSQLRuntimeOperationalStore,
@@ -34,7 +43,10 @@ def run_durable_actual_host_transition(
 ) -> HostTransitionResult:
     """DB設定済みならdurable coordinatorを通し、未設定なら従来入口へ委譲する。"""
     base_values = dict(environment or os.environ)
-    required = base_values.get("LOOP_OPERATIONAL_STORE_REQUIRED", "false").strip().lower() == "true"
+    required = (
+        base_values.get("LOOP_OPERATIONAL_STORE_REQUIRED", "false").strip().lower()
+        == "true"
+    )
     database_configured = bool(
         base_values.get("LOOP_POSTGRES_DSN", "").strip()
         or base_values.get("LOOP_DATABASE_URL", "").strip()
