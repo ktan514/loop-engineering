@@ -58,6 +58,8 @@ expected effect
 
 実行順序は常に`lease → DB意図確定 → Write Gate再確認 → effect実行 → readback → DB結果確定`である。Write Gate不成立、readback不能、期待外のidentityは`UNCERTAIN`または`BLOCKED`であり、同じkeyを再送しない。
 
+packet開始時の`lease`、`STARTED` packet、`INTENT_RECORDED` effect、`EFFECT_PENDING` Checkpoint、Workのpointer更新は、1つのPostgreSQL文で**全成功または全失敗**として確定する。事前の重複確認後に同時実行による一意制約競合が発生した場合はSQL文自体を失敗させ、`ON CONFLICT DO NOTHING`等で後段だけを無効化してleaseやpacketを部分確定してはならない。DB接続層はその失敗を型付き`WORK_STATE_TRANSACTION_FAILED`へ正規化し、外部effectへ進めない。
+
 ## 5. outbox
 
 outboxは`work identity + checkpoint identity + report kind`を一意キーとする。報告本文は定型化した状態、確認済みeffect、待機理由、次の人間への連絡事項だけを含み、DB内部ID、秘密値、認証情報、無加工診断、作業パケット全体を除外する。
@@ -81,7 +83,7 @@ Preflight
 
 `--v2-once`はWork identityを必須とする。DBに復元対象が無い場合、またはpacket generationが一致しない場合は変更せず終了する。複数Workの自動選択、sleep、polling、別Workへの暗黙移動は行わない。
 
-leaseは`repository + work identity`単位で原子的に取得し、holder、取得時刻、期限、packet generationを保存する。期限切れleaseは、前holderの未確定effectを先に読戻した場合だけ引き継げる。
+leaseは`repository + work identity`単位で原子的に取得し、holder、取得時刻、期限、packet generationを保存する。期限切れleaseは、前holderの未確定effectを先に読戻し、当該Workに`INTENT_RECORDED`または`UNCERTAIN`のeffectが残っていないことをDB上で確認できた場合だけ引き継げる。未確定effectが1件でも残る場合は、新holderへのlease更新、packet発行、Checkpoint更新をすべて行わない。
 
 ## 7. 移行と切替
 
@@ -102,7 +104,7 @@ leaseは`repository + work identity`単位で原子的に取得し、holder、�
 3. `INTENT_RECORDED`と`UNCERTAIN`の全effect kindで再送0回を証明する。
 4. effectの読戻しが別HEAD、別base、別revisionなら変更0回を証明する。
 5. outbox投稿失敗後、effectなしで同じ報告だけを再送できる。
-6. lease競合、期限切れ、DB障害、migration不一致で変更0回を証明する。
+6. lease競合、未確定effectを伴う期限切れlease、DB障害、migration不一致で変更0回を証明する。packet/effect/Checkpointの一意制約競合では文全体が失敗し、leaseやpacketを含む部分状態が残らないことを証明する。
 7. 旧入口がV2 Workを実行できない。
 8. `--v2-once`が1 packet・1遷移だけ実行する。
 9. 実機では専用DBと明示指定の非破壊Workで、DB復元とoutboxのreadbackを確認する。
