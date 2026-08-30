@@ -68,6 +68,8 @@ effect_attempts
 
 `work_records.revision`と各Checkpointのgenerationにより、同じ作業パケットを停止後に二重実行しない。DB更新と外部効果の間に異常終了した場合は、`UNCERTAIN`として残し、再送ではなく対象外部効果の照合へ進む。
 
+再開・effect・報告の厳密な状態機械は`work_recovery_algorithm.md`を正本とする。
+
 ## 4. 起動・再開手順
 
 ```text
