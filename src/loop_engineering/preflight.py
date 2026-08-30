@@ -272,9 +272,11 @@ class EnvironmentCapabilityPreflight:
         number = self._config.project_number
         query = (
             "query { "
-            f'user(login: "{owner}") {{ projectV2(number: {number}) {{ viewerCanUpdate }} }} '
-            f'organization(login: "{owner}") '
-            f"{{ projectV2(number: {number}) {{ viewerCanUpdate }} }} "
+            f'repositoryOwner(login: "{owner}") {{ '
+            "... on ProjectV2Owner { "
+            f"projectV2(number: {number}) {{ viewerCanUpdate }} "
+            "} "
+            "} "
             "}"
         )
         result = self._run(
@@ -291,11 +293,18 @@ class EnvironmentCapabilityPreflight:
             return False, False
         if not isinstance(data, dict):
             return False, False
-        for owner_kind in ("user", "organization"):
-            owner_value = data.get(owner_kind)
-            if not isinstance(owner_value, dict):
-                continue
+        owner_value = data.get("repositoryOwner")
+        if isinstance(owner_value, dict):
             project = owner_value.get("projectV2")
+            if isinstance(project, dict):
+                return True, project.get("viewerCanUpdate") is True
+
+        # 旧Fake応答との互換だけを維持する。実際のqueryはrepositoryOwnerのみを使用する。
+        for owner_kind in ("user", "organization"):
+            legacy_owner = data.get(owner_kind)
+            if not isinstance(legacy_owner, dict):
+                continue
+            project = legacy_owner.get("projectV2")
             if isinstance(project, dict):
                 return True, project.get("viewerCanUpdate") is True
         return False, False
