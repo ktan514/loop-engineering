@@ -55,8 +55,7 @@ class SubprocessCommandRunner:
                 command,
                 check=False,
                 stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
                 text=True,
                 env=dict(environment) if environment is not None else None,
                 timeout=self._TIMEOUT_SECONDS,
@@ -274,7 +273,7 @@ class EnvironmentCapabilityPreflight:
             f'"{self._config.owner}"'
             ") { projectV2(number: "
             f"{self._config.project_number}"
-            ") { id viewerCanUpdate } } }"
+            ") { viewerCanUpdate } } }"
         )
         result = self._run(
             "github_project_access",
@@ -288,7 +287,7 @@ class EnvironmentCapabilityPreflight:
             project = json.loads(result.output)["data"]["user"]["projectV2"]
         except (KeyError, TypeError, json.JSONDecodeError):
             return False, False
-        if not isinstance(project, dict) or not isinstance(project.get("id"), str):
+        if not isinstance(project, dict):
             return False, False
         return True, project.get("viewerCanUpdate") is True
 
