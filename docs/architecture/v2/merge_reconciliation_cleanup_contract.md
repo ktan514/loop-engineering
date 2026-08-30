@@ -3,6 +3,7 @@
 Owner Issue: #50
 Parent: #9
 運用Authority: #26
+Related observability: #52
 
 ## 1. 目的
 
@@ -49,28 +50,23 @@ merge commit作成後は`MERGE_HEAD`が消える。以後の失敗には次が�
 
 この段階ではremoteへeffectが発生した可能性を否定できないため、`reset --hard`、rebase、force push等で自動的に開始HEADへ戻さない。
 
-cleanup readbackで開始HEADへ戻っていることを証明できない場合は:
+cleanup readbackで開始HEADへ戻っていることを証明できない場合はcleanup failureとして保持し、現行Controllerは`MERGE_RECONCILIATION_FAILED`でfail-closedする。
 
-```text
-INTERVENTION_REQUIRED
-MERGE_RECONCILIATION_CLEANUP_FAILED
-```
-
-としてfail-closedする。
+cleanup failureを専用detail `MERGE_RECONCILIATION_CLEANUP_FAILED`として上位へ公開する観測性改善は#52で扱う。
 
 既に発生した可能性のあるcommit/pushを「なかったこと」にしない。
 
 ## 5. Host contract
 
-`PilotPlanningImplementer.continue_work()`はreconciliation開始後、成功finalize以外の全経路でcleanupを試みる。
+`TrustedWorktree`はreconciliation開始後、成功finalize以外の失敗経路でcleanupを試みる。
 
-- Codex failure → cleanup
-- Codex success + finalize failure → cleanup
+- Codex failure → `abort_merge_if_needed()`
+- Codex success + finalize failure → `finalize()`内部でcleanup
 - finalize success → cleanupしない
 
-cleanup結果が不明または失敗なら、Controllerへtyped failureを公開する。
+cleanup成功時は開始HEAD・`MERGE_HEAD`不在・clean statusをreadbackする。
 
-`ReconciliationAwareHostLoopController`はtyped cleanup failureを一般的な`MERGE_RECONCILIATION_FAILED`へ潰さない。
+cleanup結果が不明または失敗の場合でも、Controllerは一般的な`MERGE_RECONCILIATION_FAILED`として停止し、再dispatchしない。専用detailへの分類は#52の責務とする。
 
 ## 6. Safety
 
@@ -87,9 +83,9 @@ cleanup結果が不明または失敗なら、Controllerへtyped failureを公�
 - Codex success + unresolved conflict → abort + clean start HEAD
 - diff-check/stage/commit failure → abort + clean start HEAD
 - successful finalize → abortなし
-- abort command failure → cleanup failure
-- abort後HEAD mismatch → cleanup failure
-- MERGE_HEADなし + HEAD changed → cleanup failure
-- cleanup failureは`MERGE_RECONCILIATION_CLEANUP_FAILED`
+- abort command failure → cleanup failureとして保持
+- abort後HEAD mismatch → cleanup failureとして保持
+- MERGE_HEADなし + HEAD changed → cleanup failureとして保持
+- cleanup failure時も履歴を自動resetせずfail-closed
 - pytest / Ruff / strict Mypy / compileall / diff-check PASS
-- actual-host再試行で成功またはcleanなtyped failureとなり、未解決merge状態を残さない
+- actual-host再試行で成功またはcleanなfailureとなり、未解決merge状態を残さない
