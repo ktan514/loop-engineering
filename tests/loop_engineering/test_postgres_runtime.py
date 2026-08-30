@@ -25,7 +25,7 @@ class RecordingRunner:
     ) -> Result:
         call = tuple(command)
         self.calls.append((call, environment))
-        if "SELECT filename FROM loop_schema_migrations" in call:
+        if any("SELECT filename FROM loop_schema_migrations" in part for part in call):
             return Result(True, self.migration_output)
         return Result(True, "1\n")
 
