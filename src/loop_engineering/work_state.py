@@ -159,18 +159,7 @@ class PostgreSQLWorkStateStore:
         )
         if not rows:
             return None
-        row = rows[0]
-        return WorkCheckpoint(
-            identity=_required_string(row, "identity"),
-            work_identity=_required_string(row, "work_identity"),
-            run_identity=_required_string(row, "run_identity"),
-            task_packet_identity=_optional_string(row, "task_packet_identity"),
-            checkpoint_kind=_required_string(row, "checkpoint_kind"),
-            resumable_state=_required_string(row, "resumable_state"),
-            next_action=_required_string(row, "next_action"),
-            external_target_identities=_string_tuple(row, "external_target_identities"),
-            evidence_identities=_string_tuple(row, "evidence_identities"),
-        )
+        return _work_checkpoint(rows[0])
 
     def record_effect_intent(self, attempt: EffectAttempt) -> bool:
         if attempt.status != "INTENT_RECORDED":
@@ -214,7 +203,7 @@ class PostgreSQLWorkStateStore:
             return None
         record = _work_record(records[0])
         packet = self._task_packet(record.latest_task_packet_identity)
-        checkpoint = self.latest_checkpoint(work_identity)
+        checkpoint = self._checkpoint(record.latest_checkpoint_identity)
         pending_effects = self._pending_effects(work_identity)
         return RecoveredWork(record, packet, checkpoint, pending_effects)
 
@@ -253,7 +242,7 @@ class PostgreSQLWorkStateStore:
             f"WHERE identity = {_literal(identity)} LIMIT 1"
         )
         if not rows:
-            raise WorkStateUnavailable("TASK_PACKET_MISSING")
+            return None
         row = rows[0]
         generation = row.get("generation")
         if not isinstance(generation, int) or generation < 1:
@@ -267,6 +256,19 @@ class PostgreSQLWorkStateStore:
             canonical_design_identities=_string_tuple(row, "canonical_design_identities"),
             external_target_identities=_string_tuple(row, "external_target_identities"),
         )
+
+    def _checkpoint(self, identity: str | None) -> WorkCheckpoint | None:
+        if identity is None:
+            return None
+        rows = self._query(
+            "SELECT identity, work_identity, run_identity, task_packet_identity, checkpoint_kind, "
+            "resumable_state, next_action, external_target_identities, evidence_identities "
+            "FROM loop_work_checkpoints "
+            f"WHERE identity = {_literal(identity)} LIMIT 1"
+        )
+        if not rows:
+            return None
+        return _work_checkpoint(rows[0])
 
     def _pending_effects(self, work_identity: str) -> tuple[EffectAttempt, ...]:
         rows = self._query(
@@ -348,4 +350,18 @@ def _work_record(row: dict[str, object]) -> WorkRecord:
         active_lineage_identity=_optional_string(row, "active_lineage_identity"),
         latest_task_packet_identity=_optional_string(row, "latest_task_packet_identity"),
         latest_checkpoint_identity=_optional_string(row, "latest_checkpoint_identity"),
+    )
+
+
+def _work_checkpoint(row: dict[str, object]) -> WorkCheckpoint:
+    return WorkCheckpoint(
+        identity=_required_string(row, "identity"),
+        work_identity=_required_string(row, "work_identity"),
+        run_identity=_required_string(row, "run_identity"),
+        task_packet_identity=_optional_string(row, "task_packet_identity"),
+        checkpoint_kind=_required_string(row, "checkpoint_kind"),
+        resumable_state=_required_string(row, "resumable_state"),
+        next_action=_required_string(row, "next_action"),
+        external_target_identities=_string_tuple(row, "external_target_identities"),
+        evidence_identities=_string_tuple(row, "evidence_identities"),
     )
