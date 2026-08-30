@@ -31,6 +31,8 @@ dependency issue identities
 priority / Project status / 計画日
 ```
 
+`acceptance criteria digest`は対象Projectの型付きfieldを正本とする。Issue本文・comment、更新時刻、親子関係、追跡関係を代用してはならない。GitHubの`blockedBy`だけを依存関係として同期する。field欠落・提供元読取不能・Issue closed・依存未完了は、それぞれ異なる型付き結果として呼出側へ返す。
+
 IssueがclosedでDBのWorkが`COMPLETED`以外なら`WORK_CLOSED_BEFORE_COMPLETION`、dependencyが未完了なら`WAITING(DEPENDENCY_PENDING)`、同一Issue identityへの異なる受入条件digestは`BLOCKED(WORK_DEFINITION_CONFLICT)`とする。
 
 同期は作業パケットの対象、PR、HEADを作らない。これらはDBに既存のpacketがある場合にだけ、effect読戻しの対象として扱う。

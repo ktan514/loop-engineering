@@ -4,6 +4,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from loop_engineering.v2_resume import WorkDefinitionStatus
 from loop_engineering.v2_work_definition import GitHubWorkDefinitionAdapter
 from loop_engineering.work_state import WorkRecord
 
@@ -31,19 +32,21 @@ def test_synchronizes_only_typed_issue_and_project_fields() -> None:
                 {"field": {"name": "Status"}, "name": "In Progress"},
                 {"field": {"name": "Priority"}, "name": "P1"},
                 {"field": {"name": "Start date"}, "date": "2026-09-02"},
+                {"field": {"name": "Acceptance criteria digest"}, "name": "sha256:abc"},
             ]}}]},
         }}}}
     runner = Runner(json.dumps(payload), [])
 
     actual = GitHubWorkDefinitionAdapter(runner, 9).synchronize(record())
 
-    assert actual is not None
-    assert actual.issue_revision.startswith("definition:")
-    assert actual.identity == record().identity
+    assert actual.status is WorkDefinitionStatus.READY
+    assert actual.record is not None
+    assert actual.record.issue_revision.startswith("definition:")
+    assert actual.record.identity == record().identity
     assert len(runner.calls) == 1
     command = " ".join(runner.calls[0])
     assert "projectItems" in command
-    assert " body " in command
+    assert "body" not in command
     assert "comments" not in command
 
 
@@ -53,23 +56,25 @@ def test_closed_or_missing_project_is_unavailable() -> None:
         "projectItems": {"nodes": []},
     }}}}
     adapter = GitHubWorkDefinitionAdapter(Runner(json.dumps(closed), []), 9)
-    assert adapter.synchronize(record()) is None
+    assert adapter.synchronize(record()).status is WorkDefinitionStatus.CLOSED_BEFORE_COMPLETION
 
 
 def test_comment_updates_do_not_change_revision_and_open_dependency_waits() -> None:
     issue = {
-        "number": 65, "state": "OPEN", "body": "## 受入条件\n\n- 同期する",
+        "number": 65, "state": "OPEN",
         "updatedAt": "comment-update-only", "parent": {"number": 62, "state": "CLOSED"},
-        "trackedIssues": {"nodes": []},
-        "projectItems": {"nodes": [{"project": {"number": 9}, "fieldValues": {"nodes": []}}]},
+        "blockedBy": {"nodes": []},
+        "projectItems": {"nodes": [{"project": {"number": 9}, "fieldValues": {"nodes": [
+            {"field": {"name": "Acceptance criteria digest"}, "name": "sha256:abc"},
+        ]}}]},
     }
     payload = {"data": {"repository": {"issue": issue}}}
     first = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9).synchronize(record())
     issue["updatedAt"] = "another-comment-update"
     second = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9).synchronize(record())
-    assert first is not None and second is not None
-    assert first.issue_revision == second.issue_revision
+    assert first.record is not None and second.record is not None
+    assert first.record.issue_revision == second.record.issue_revision
 
-    issue["trackedIssues"] = {"nodes": [{"number": 66, "state": "OPEN"}]}
+    issue["blockedBy"] = {"nodes": [{"number": 66, "state": "OPEN"}]}
     adapter = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9)
-    assert adapter.synchronize(record()) is None
+    assert adapter.synchronize(record()).status is WorkDefinitionStatus.DEPENDENCY_PENDING

@@ -6,6 +6,8 @@ from loop_engineering.v2_resume import (
     EffectReadbackStatus,
     V2ResumeCoordinator,
     V2ResumeStatus,
+    WorkDefinitionResult,
+    WorkDefinitionStatus,
 )
 from loop_engineering.work_state import (
     EffectAttempt,
@@ -73,10 +75,18 @@ class Definitions:
     value: WorkRecord | None
     calls: int = 0
 
-    def synchronize(self, current: WorkRecord) -> WorkRecord | None:
+    def synchronize(self, current: WorkRecord) -> WorkDefinitionResult:
         assert current == record()
         self.calls += 1
-        return self.value
+        status = (
+            WorkDefinitionStatus.READY
+            if self.value is not None
+            else WorkDefinitionStatus.UNAVAILABLE
+        )
+        return WorkDefinitionResult(
+            status,
+            self.value,
+        )
 
 
 @dataclass

@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from .v2_resume import WorkDefinitionResult, WorkDefinitionStatus
 from .work_state import WorkRecord
 
 
@@ -20,7 +21,7 @@ class WorkDefinitionSnapshot:
     repository: str
     issue_number: int
     issue_state: str
-    acceptance_criteria_digest: str
+    acceptance_criteria_digest: str | None
     dependency_identities: tuple[str, ...]
     dependency_states: tuple[str, ...]
     project_status: str | None
@@ -63,11 +64,17 @@ class GitHubWorkDefinitionAdapter:
         self._runner = runner
         self._project_number = project_number
 
-    def synchronize(self, current: WorkRecord) -> WorkRecord | None:
+    def synchronize(self, current: WorkRecord) -> WorkDefinitionResult:
         snapshot = self._snapshot(current.repository, current.issue_number)
-        if snapshot is None or snapshot.blocking_reason is not None:
-            return None
-        return WorkRecord(
+        if snapshot is None:
+            return WorkDefinitionResult(WorkDefinitionStatus.UNAVAILABLE)
+        if snapshot.issue_state == "CLOSED":
+            return WorkDefinitionResult(WorkDefinitionStatus.CLOSED_BEFORE_COMPLETION)
+        if snapshot.blocking_reason is not None:
+            return WorkDefinitionResult(WorkDefinitionStatus.DEPENDENCY_PENDING)
+        if snapshot.acceptance_criteria_digest is None:
+            return WorkDefinitionResult(WorkDefinitionStatus.UNAVAILABLE)
+        return WorkDefinitionResult(WorkDefinitionStatus.READY, WorkRecord(
             identity=current.identity,
             repository=current.repository,
             issue_number=current.issue_number,
@@ -77,7 +84,7 @@ class GitHubWorkDefinitionAdapter:
             active_lineage_identity=current.active_lineage_identity,
             latest_task_packet_identity=current.latest_task_packet_identity,
             latest_checkpoint_identity=current.latest_checkpoint_identity,
-        )
+        ))
 
     def _snapshot(self, repository: str, issue_number: int) -> WorkDefinitionSnapshot | None:
         if "/" not in repository or issue_number < 1 or self._project_number < 1:
@@ -85,8 +92,8 @@ class GitHubWorkDefinitionAdapter:
         owner, name = repository.split("/", maxsplit=1)
         query = (
             "query($owner:String!,$name:String!,$issue:Int!){"
-            "repository(owner:$owner,name:$name){issue(number:$issue){number state body "
-            "parent{number state} trackedIssues(first:50){nodes{number state}} "
+            "repository(owner:$owner,name:$name){issue(number:$issue){number state "
+            "blockedBy(first:50){nodes{repository{nameWithOwner} number state}} "
             "projectItems(first:20){nodes{project{number} fieldValues(first:20){nodes{"
             "... on ProjectV2ItemFieldSingleSelectValue{field{... on ProjectV2FieldCommon{"
             "name}}name}"
@@ -106,16 +113,26 @@ class GitHubWorkDefinitionAdapter:
         issue = _mapping(_mapping(_mapping(payload, "data"), "repository"), "issue")
         number = issue.get("number")
         state = issue.get("state")
-        body = issue.get("body")
-        if number != issue_number or not isinstance(state, str) or not isinstance(body, str):
+        if number != issue_number or not isinstance(state, str):
             return None
+        if state == "CLOSED":
+            return WorkDefinitionSnapshot(
+                repository, issue_number, state, None, (), (), None, None, None, None
+            )
         values = _project_values(issue, self._project_number)
         if values is None:
             return None
         identities, states = _dependencies(issue)
         return WorkDefinitionSnapshot(
-            repository, issue_number, state, _digest(body), identities, states,
-            values.get("Status"), values.get("Priority"), values.get("Start date"),
+            repository,
+            issue_number,
+            state,
+            values.get("Acceptance criteria digest"),
+            identities,
+            states,
+            values.get("Status"),
+            values.get("Priority"),
+            values.get("Start date"),
             values.get("Target date"),
         )
 
@@ -149,23 +166,21 @@ def _mapping(value: Mapping[str, object], key: str) -> Mapping[str, object]:
     return nested if isinstance(nested, dict) else {}
 
 
-def _digest(value: str) -> str:
-    return hashlib.sha256(value.encode()).hexdigest()
-
-
 def _dependencies(issue: Mapping[str, object]) -> tuple[tuple[str, ...], tuple[str, ...]]:
     candidates: list[Mapping[str, object]] = []
-    parent = _mapping(issue, "parent")
-    if parent:
-        candidates.append(parent)
-    nodes = _mapping(issue, "trackedIssues").get("nodes")
+    nodes = _mapping(issue, "blockedBy").get("nodes")
     if isinstance(nodes, list):
         candidates.extend(node for node in nodes if isinstance(node, dict))
     identities: list[str] = []
     states: list[str] = []
     for candidate in candidates:
         number, state = candidate.get("number"), candidate.get("state")
+        dependency_repository = _mapping(candidate, "repository").get("nameWithOwner")
         if isinstance(number, int) and isinstance(state, str):
-            identities.append(f"issue:{number}")
+            identities.append(
+                f"issue:{dependency_repository}:{number}"
+                if isinstance(dependency_repository, str)
+                else f"issue:{number}"
+            )
             states.append(state)
     return tuple(identities), tuple(states)
