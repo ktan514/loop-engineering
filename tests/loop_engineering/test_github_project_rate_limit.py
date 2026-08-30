@@ -3,13 +3,18 @@ import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from loop_engineering.durable_host_entrypoint import _project_rate_limit_is_only_blocker
+from loop_engineering.durable_host_entrypoint import (
+    _project_rate_limit_is_only_blocker,
+    _record_preflight_external_wait,
+)
+from loop_engineering.host_runtime import HostTransitionResult, HostTransitionStatus
 from loop_engineering.preflight import (
     CommandResult,
     EnvironmentCapabilityPreflight,
     PreflightResult,
     PreflightStatus,
 )
+from loop_engineering.runtime_operational_state import OperationalStateUnavailable
 
 from .conftest import config
 
@@ -41,7 +46,6 @@ class ProjectProbeRunner:
                         "data": {
                             "user": {
                                 "projectV2": {
-                                    "id": "PVT_test",
                                     "viewerCanUpdate": True,
                                 }
                             }
@@ -64,6 +68,35 @@ class ReviewerProbe:
     def check(self, socket_path: str, timeout_seconds: float) -> bool:
         del socket_path, timeout_seconds
         return True
+
+
+class WaitStore:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.events: list[tuple[str, str]] = []
+
+    def begin_run(self, run_identity: str, project_key: str, repository: str) -> None:
+        del project_key, repository
+        self.events.append(("begin", run_identity))
+        if self.fail:
+            raise OperationalStateUnavailable("test")
+
+    def record_transition(
+        self,
+        run_identity: str,
+        sequence_number: int,
+        result: HostTransitionResult,
+    ) -> None:
+        assert sequence_number == 1
+        self.events.append(("transition", f"{run_identity}:{result.detail}"))
+
+    def record_external_wait(
+        self, run_identity: str, result: HostTransitionResult
+    ) -> None:
+        self.events.append(("wait", f"{run_identity}:{result.detail}"))
+
+    def finish_run(self, run_identity: str, status: str) -> None:
+        self.events.append(("finish", f"{run_identity}:{status}"))
 
 
 def _environment(root: Path) -> dict[str, str]:
@@ -143,3 +176,36 @@ def test_only_project_rate_limit_blockers_are_external_wait_eligible() -> None:
 
     assert _project_rate_limit_is_only_blocker(rate_limited)
     assert not _project_rate_limit_is_only_blocker(mixed)
+
+
+def test_preflight_external_wait_is_persisted_as_terminal_yield() -> None:
+    store = WaitStore()
+    result = HostTransitionResult(
+        HostTransitionStatus.YIELD_EXTERNAL,
+        "GITHUB_PROJECT_RATE_LIMIT",
+    )
+
+    assert _record_preflight_external_wait(
+        store,  # type: ignore[arg-type]
+        project_key="ai-liver-yura",
+        repository="ktan514/ai-liver-yura",
+        result=result,
+        required=True,
+    )
+    assert [kind for kind, _ in store.events] == ["begin", "transition", "wait", "finish"]
+    assert store.events[-1][1].endswith(":YIELD_EXTERNAL")
+
+
+def test_required_store_failure_blocks_preflight_wait_recording() -> None:
+    result = HostTransitionResult(
+        HostTransitionStatus.YIELD_EXTERNAL,
+        "GITHUB_PROJECT_RATE_LIMIT",
+    )
+
+    assert not _record_preflight_external_wait(
+        WaitStore(fail=True),  # type: ignore[arg-type]
+        project_key="ai-liver-yura",
+        repository="ktan514/ai-liver-yura",
+        result=result,
+        required=True,
+    )
