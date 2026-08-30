@@ -45,8 +45,16 @@ class TrustedWorktree:
         self._runner = runner
         self._root = root
         self._environment = _trusted_environment(environment)
+        self._last_reconciliation_cleanup_failed = False
+
+    @property
+    def reconciliation_cleanup_failed(self) -> bool:
+        """直近reconciliation失敗後のcleanupが安全に完了しなかったかを返す。"""
+
+        return self._last_reconciliation_cleanup_failed
 
     def prepare(self, target: HostTarget) -> PreparedWorktree | None:
+        self._last_reconciliation_cleanup_failed = False
         if not self._worktree_is_clean():
             return None
 
@@ -98,35 +106,35 @@ class TrustedWorktree:
     ) -> FinalizedWorktree | None:
         unresolved = self._git_output(("diff", "--name-only", "--diff-filter=U"))
         if unresolved is None or unresolved.strip():
-            return None
+            return self._finalize_failed(prepared)
         if not self._git(("diff", "--check")).succeeded:
-            return None
+            return self._finalize_failed(prepared)
         if not self._git(("add", "-A")).succeeded:
-            return None
+            return self._finalize_failed(prepared)
 
         staged = self._git(("diff", "--cached", "--quiet"))
         if staged.returncode == 0:
-            return None
+            return self._finalize_failed(prepared)
         if staged.returncode != 1:
-            return None
+            return self._finalize_failed(prepared)
 
         message = _commit_message(target.work_issue, prepared.reconciliation_started, repair)
         if not self._git(("commit", "-m", message), timeout_seconds=180).succeeded:
-            return None
+            return self._finalize_failed(prepared)
         head_sha = self._git_output(("rev-parse", "HEAD"))
         if head_sha is None or len(head_sha) != 40:
-            return None
+            return self._finalize_failed(prepared)
         if not self._git(
             ("push", "-u", "origin", f"HEAD:{prepared.branch}"),
             timeout_seconds=300,
         ).succeeded:
-            return None
+            return self._finalize_failed(prepared)
 
         pr_number = prepared.pr_number
         if pr_number is None:
             pr_number = self._create_draft_pr(target.work_issue, prepared.branch)
             if pr_number is None:
-                return None
+                return self._finalize_failed(prepared)
 
         if not self._publish_checkpoint(
             target.work_issue,
@@ -134,13 +142,45 @@ class TrustedWorktree:
             prepared.branch,
             head_sha,
         ):
-            return None
+            return self._finalize_failed(prepared)
+        self._last_reconciliation_cleanup_failed = False
         return FinalizedWorktree(prepared.branch, head_sha, pr_number)
 
-    def abort_merge_if_needed(self, prepared: PreparedWorktree | None) -> None:
+    def abort_merge_if_needed(self, prepared: PreparedWorktree | None) -> bool:
+        """reconciliation途中ならabortし、開始前のclean状態へ戻ったことまで確認する。"""
+
         if prepared is None or not prepared.reconciliation_started:
-            return
-        self._git(("merge", "--abort"))
+            self._last_reconciliation_cleanup_failed = False
+            return True
+
+        merge_head = self._git(("rev-parse", "-q", "--verify", "MERGE_HEAD"))
+        if merge_head.succeeded:
+            if not self._git(("merge", "--abort")).succeeded:
+                self._last_reconciliation_cleanup_failed = True
+                return False
+        elif merge_head.returncode != 1:
+            self._last_reconciliation_cleanup_failed = True
+            return False
+
+        current_head = self._git_output(("rev-parse", "HEAD"))
+        merge_head_after = self._git(("rev-parse", "-q", "--verify", "MERGE_HEAD"))
+        status = self._git_output(("status", "--porcelain"))
+        cleaned = (
+            current_head == prepared.start_head
+            and merge_head_after.returncode == 1
+            and status is not None
+            and not status.strip()
+        )
+        self._last_reconciliation_cleanup_failed = not cleaned
+        return cleaned
+
+    def _finalize_failed(
+        self,
+        prepared: PreparedWorktree,
+    ) -> FinalizedWorktree | None:
+        if prepared.reconciliation_started:
+            self.abort_merge_if_needed(prepared)
+        return None
 
     def _prepare_new_branch(self, work_issue: int) -> str | None:
         trunk = self._config.trunk_branch
