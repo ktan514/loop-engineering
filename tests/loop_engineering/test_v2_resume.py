@@ -7,7 +7,13 @@ from loop_engineering.v2_resume import (
     V2ResumeCoordinator,
     V2ResumeStatus,
 )
-from loop_engineering.work_state import EffectAttempt, RecoveredWork, WorkRecord
+from loop_engineering.work_state import (
+    EffectAttempt,
+    RecoveredWork,
+    WorkCheckpoint,
+    WorkRecord,
+    WorkTaskPacket,
+)
 
 
 def record() -> WorkRecord:
@@ -18,6 +24,30 @@ def record() -> WorkRecord:
         issue_revision="issue:62:1",
         lifecycle="SELECTED",
         selected_transition="IMPLEMENT",
+        latest_task_packet_identity="packet:62:1",
+        latest_checkpoint_identity="checkpoint:62:1",
+    )
+
+
+def packet() -> WorkTaskPacket:
+    return WorkTaskPacket(
+        identity="packet:62:1",
+        work_identity=record().identity,
+        generation=1,
+        transition="IMPLEMENT",
+        status="ISSUED",
+    )
+
+
+def checkpoint() -> WorkCheckpoint:
+    return WorkCheckpoint(
+        identity="checkpoint:62:1",
+        work_identity=record().identity,
+        run_identity="run:62:1",
+        checkpoint_kind="SAFE_POINT",
+        resumable_state="IMPLEMENT_READY",
+        next_action="作業パケットを実行する",
+        task_packet_identity=packet().identity,
     )
 
 
@@ -59,11 +89,21 @@ class Effects:
         return self.status
 
 
-def recovered(*, pending: tuple[EffectAttempt, ...] = ()) -> RecoveredWork:
-    return RecoveredWork(record(), None, None, pending)
+def recovered(
+    *,
+    pending: tuple[EffectAttempt, ...] = (),
+    task_packet: WorkTaskPacket | None = None,
+    safe_checkpoint: WorkCheckpoint | None = None,
+) -> RecoveredWork:
+    return RecoveredWork(
+        record(),
+        packet() if task_packet is None else task_packet,
+        checkpoint() if safe_checkpoint is None else safe_checkpoint,
+        pending,
+    )
 
 
-def test_resume_is_ready_after_db_recovery_and_definition_sync() -> None:
+def test_resume_is_ready_after_complete_db_recovery_and_definition_sync() -> None:
     recovery = Recovery(recovered())
     definitions = Definitions(record())
     effects = Effects(EffectReadbackStatus.CONFIRMED)
@@ -74,6 +114,39 @@ def test_resume_is_ready_after_db_recovery_and_definition_sync() -> None:
     assert result.detail == "RESUME_READY"
     assert recovery.synchronized == [record()]
     assert effects.calls == []
+
+
+def test_missing_or_inconsistent_recovery_stays_blocked_before_definition_sync() -> None:
+    definitions = Definitions(record())
+    missing_packet = RecoveredWork(record(), None, checkpoint(), ())
+
+    result = V2ResumeCoordinator(
+        Recovery(missing_packet),
+        definitions,
+        Effects(EffectReadbackStatus.CONFIRMED),
+    ).resume(record().identity)
+
+    assert result.status is V2ResumeStatus.BLOCKED
+    assert result.detail == "WORK_RECOVERY_MISSING"
+    assert definitions.calls == 0
+
+    mismatched_checkpoint = WorkCheckpoint(
+        identity="checkpoint:62:1",
+        work_identity=record().identity,
+        run_identity="run:62:1",
+        checkpoint_kind="SAFE_POINT",
+        resumable_state="IMPLEMENT_READY",
+        next_action="作業パケットを実行する",
+        task_packet_identity="packet:other",
+    )
+    inconsistent = V2ResumeCoordinator(
+        Recovery(RecoveredWork(record(), packet(), mismatched_checkpoint, ())),
+        Definitions(record()),
+        Effects(EffectReadbackStatus.CONFIRMED),
+    ).resume(record().identity)
+
+    assert inconsistent.status is V2ResumeStatus.BLOCKED
+    assert inconsistent.detail == "WORK_RECOVERY_MISSING"
 
 
 def test_unknown_effect_stops_before_any_new_execution() -> None:
