@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import hashlib
 import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+
+from .mission_goal import inject_mission_goal_environment
 
 
 class SecretProvider(Protocol):
@@ -57,6 +58,12 @@ _NON_SECRET_LOOP_KEYS = (
     "LOOP_TRUSTED_REVIEWER_SOCKET",
     "LOOP_CODEX_COMMAND_JSON",
 )
+_GOAL_KEYS = (
+    "LOOP_MISSION_GOAL_PATH",
+    "CODEX_MISSION_GOAL_VERSION",
+    "CODEX_MISSION_GOAL_GENERATION",
+    "CODEX_MISSION_GOAL_SHA256",
+)
 
 
 def build_launch_environment(
@@ -64,29 +71,23 @@ def build_launch_environment(
     secrets: SecretProvider,
     parent: Mapping[str, str],
 ) -> LaunchEnvironment:
-    goal = root / "docs" / "operations" / "loop_mission_goal.md"
-    content = goal.read_bytes()
-    lines = content.decode("utf-8").splitlines()
-    version = next(
-        line.removeprefix("version: ")
-        for line in lines
-        if line.startswith("version: ")
+    platform_root = Path(__file__).resolve().parents[2]
+    goal_environment = inject_mission_goal_environment(
+        platform_root=platform_root,
+        product_root=root,
+        repository=parent.get("LOOP_REPOSITORY", ""),
+        environment=parent,
     )
-    generation = next(
-        line.removeprefix("generation: ")
-        for line in lines
-        if line.startswith("generation: ")
-    )
+    if not all(goal_environment.get(name) for name in _GOAL_KEYS):
+        raise ValueError("Mission Goalを信頼済み参照元から解決できません")
+
     path = parent.get("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
     values: dict[str, str] = {
         "PATH": path,
         "GH_TOKEN": secrets.github_token(),
-        "CODEX_MISSION_GOAL_VERSION": version,
-        "CODEX_MISSION_GOAL_GENERATION": generation,
-        "CODEX_MISSION_GOAL_SHA256": hashlib.sha256(content).hexdigest(),
     }
-    for name in _NON_SECRET_LOOP_KEYS:
-        value = parent.get(name)
+    for name in (*_NON_SECRET_LOOP_KEYS, *_GOAL_KEYS):
+        value = goal_environment.get(name)
         if value:
             values[name] = value
     return LaunchEnvironment(values)

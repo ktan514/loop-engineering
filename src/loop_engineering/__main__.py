@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .config import LoopEngineeringSettings
 from .host_runtime import HostTransitionResult, HostTransitionStatus
+from .mission_goal import inject_mission_goal_environment
 from .runtime_console import RuntimeConsole, VisibleSubprocessLocalRunner
 
 _CI_RECHECK_INITIAL_SECONDS = 60.0
@@ -58,8 +59,13 @@ def main() -> int:
         print(f"CONFIGURATION_INVALID: {error}")
         return 3
 
-    environment = settings.runtime_environment(os.environ)
     workspace_root = settings.workspace_path
+    environment = inject_mission_goal_environment(
+        platform_root=platform_root,
+        product_root=workspace_root,
+        repository=settings.engine.repository,
+        environment=settings.runtime_environment(os.environ),
+    )
     console = RuntimeConsole(platform_root, verbose=arguments.verbose)
     runner = VisibleSubprocessLocalRunner(console)
     mode = "once" if arguments.once else "continuous"
@@ -67,6 +73,7 @@ def main() -> int:
     console.event(f"開始 mode={mode}（{mode_label}） project={settings.project_key}")
     console.event(f"設定: {settings.config_path}")
     console.event(f"対象Workspace: {workspace_root}")
+    console.event(f"Mission Goal: {environment['LOOP_MISSION_GOAL_PATH']}")
     console.event(f"ログ: {console.path}")
 
     ci_wait_seconds = _CI_RECHECK_INITIAL_SECONDS
