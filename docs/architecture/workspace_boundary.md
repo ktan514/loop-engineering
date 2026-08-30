@@ -79,6 +79,8 @@ Product Workspaceが所有しないもの:
 - Platform runtime database
 - cross-product scheduling state
 
+Loop Engineering自身の自己改善IssueとProject項目は、Product WorkspaceのRepository identityへ従属させない。公開先はHost設定の`[self_improvement]`で明示し、未設定時はProduct Workspaceへ書き込まない。
+
 ## 4. Runtime State placement
 
 Runtime stateはProduct Workspace外に置く。

@@ -44,6 +44,7 @@ key = sample-product
 workspace_path = /Users/example/workspace/sample-product
 repository = owner/sample-product
 trunk_branch = main
+work_branch_template = loop/work-{issue}
 ```
 
 Loop Engineeringはホームディレクトリを暗黙探索しない。

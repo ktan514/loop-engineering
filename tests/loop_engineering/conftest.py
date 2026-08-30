@@ -1,4 +1,4 @@
-from loop_engineering.config import LoopEngineConfig
+from loop_engineering.config import LoopEngineConfig, SelfImprovementConfig
 from loop_engineering.models import (
     CanonicalDesignSnapshot,
     LineageClassification,
@@ -25,6 +25,15 @@ def config() -> LoopEngineConfig:
         parent_issue=462,
         integration_work=471,
         ci_workflow_name="V2 Deterministic CI",
+        self_improvement=SelfImprovementConfig(
+            enabled=True,
+            repository="ktan514/ai-liver-yura",
+            owner="ktan514",
+            project_number=7,
+            label="loop-engineering",
+            area="Subsystem/Development Tooling",
+            issue_level="Work",
+        ),
     )
 
 

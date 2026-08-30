@@ -15,8 +15,13 @@ def validate(
     *,
     config: LoopEngineConfig,
 ) -> WriteGateResult:
-    if intent.target_kind == "project" and intent.target_identity != str(config.project_number):
-        return WriteGateResult(False, ConflictKind.FORBIDDEN_PROJECT_IDENTITY)
+    if intent.target_kind == "project":
+        allowed_projects = {str(config.project_number)}
+        sink = config.self_improvement
+        if sink.enabled and sink.project_number is not None:
+            allowed_projects.add(str(sink.project_number))
+        if intent.target_identity not in allowed_projects:
+            return WriteGateResult(False, ConflictKind.FORBIDDEN_PROJECT_IDENTITY)
     if intent.target_kind == "branch" and intent.target_identity == config.trunk_branch:
         return WriteGateResult(False, ConflictKind.DIRECT_TRUNK_WRITE_FORBIDDEN)
     if intent.target_kind == "branch" and intent.mutation_kind == "content":

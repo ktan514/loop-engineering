@@ -8,6 +8,7 @@ from datetime import date
 
 import pytest
 
+from loop_engineering.config import LoopEngineConfig, SelfImprovementConfig
 from loop_engineering.github_issues import GitHubImprovementIssuePublisher, improvement_intent
 from loop_engineering.health import marker, plan_improvements, render_issue_body
 from loop_engineering.maintenance import LoopMaintenanceCycle, SelfImprovementController
@@ -366,6 +367,111 @@ def test_maintenance_cycle_publishes_candidate_in_same_iteration() -> None:
     assert result.publication.failures == ()
     assert publisher.intents[0].label == "loop-engineering"
     assert publisher.intents[0].project_number == 7
+
+
+def test_disabled_self_improvement_does_not_publish_github_mutations() -> None:
+    disabled = LoopEngineConfig(
+        repository="ktan514/ai-liver-yura",
+        owner="ktan514",
+        project_number=7,
+        mission_issue=450,
+        label="v2",
+    )
+    publisher = RecordingPublisher()
+    result = SelfImprovementController(disabled, publisher).publish_candidates((_candidate(),))
+
+    assert result.published == ()
+    assert result.failures == ()
+    assert publisher.intents == []
+
+
+def test_product_label_does_not_flow_into_explicit_self_improvement_sink() -> None:
+    separated = LoopEngineConfig(
+        repository="ktan514/ai-liver-yura",
+        owner="ktan514",
+        project_number=7,
+        mission_issue=450,
+        label="v2",
+        self_improvement=SelfImprovementConfig(
+            enabled=True,
+            repository="ktan514/loop-engineering",
+            owner="ktan514",
+            project_number=9,
+            label="loop-engineering",
+            area="Runtime / Infrastructure",
+            issue_level="Work",
+        ),
+    )
+
+    intent = improvement_intent(_candidate(), separated)
+
+    assert intent.repository == "ktan514/loop-engineering"
+    assert intent.project_number == 9
+    assert intent.label == "loop-engineering"
+
+
+class SinkProbeRunner:
+    def __init__(self) -> None:
+        self.commands: list[tuple[str, ...]] = []
+
+    def run(self, args: Sequence[str]) -> str:
+        command = tuple(args)
+        self.commands.append(command)
+        if command[:2] == ("gh", "api"):
+            return "[[]]"
+        if command[:3] == ("gh", "issue", "create"):
+            return "https://github.com/ktan514/loop-engineering/issues/502\n"
+        if command[:4] == ("gh", "project", "view", "9"):
+            return '{"id":"PVT9"}'
+        if command[:4] == ("gh", "project", "item-list", "9"):
+            return '{"items":[]}'
+        if command[:4] == ("gh", "project", "item-add", "9"):
+            raise RuntimeError("公開先確認で停止")
+        raise AssertionError(command)
+
+
+def test_publisher_uses_self_improvement_repository_project_and_label() -> None:
+    separated = LoopEngineConfig(
+        repository="ktan514/ai-liver-yura",
+        owner="ktan514",
+        project_number=7,
+        mission_issue=450,
+        label="v2",
+        self_improvement=SelfImprovementConfig(
+            enabled=True,
+            repository="ktan514/loop-engineering",
+            owner="ktan514",
+            project_number=9,
+            label="loop-engineering",
+            area="Runtime / Infrastructure",
+            issue_level="Work",
+        ),
+    )
+    runner = SinkProbeRunner()
+
+    with pytest.raises(RuntimeError, match="公開先確認"):
+        GitHubImprovementIssuePublisher(runner=runner, config=separated).publish(
+            improvement_intent(_candidate(), separated)
+        )
+
+    issue_create = next(
+        command for command in runner.commands if command[:3] == ("gh", "issue", "create")
+    )
+    assert "ktan514/loop-engineering" in issue_create
+    assert "loop-engineering" in issue_create
+    assert not any("ktan514/ai-liver-yura" in command for command in runner.commands)
+    assert (
+        "gh",
+        "project",
+        "item-add",
+        "9",
+        "--owner",
+        "ktan514",
+        "--url",
+        "https://github.com/ktan514/loop-engineering/issues/502",
+        "--format",
+        "json",
+    ) in runner.commands
 
 
 def test_publisher_failure_is_typed_and_does_not_replace_primary_decision() -> None:

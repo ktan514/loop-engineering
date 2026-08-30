@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from loop_engineering.host_runtime import HostTarget, LocalCommandResult
@@ -31,6 +32,39 @@ class ScriptedRunner:
         if response is None:
             raise AssertionError(f"想定外のコマンドです: {args}")
         return response
+
+
+def test_new_worktree_uses_configured_product_branch_template() -> None:
+    runner = ScriptedRunner(
+        {
+            ("git", "status", "--porcelain"): LocalCommandResult(0, ""),
+            ("git", "fetch", "origin", "rebuild/v2-foundation"): LocalCommandResult(0, ""),
+            ("git", "switch", "rebuild/v2-foundation"): LocalCommandResult(0, ""),
+            ("git", "merge", "--ff-only", "origin/rebuild/v2-foundation"): LocalCommandResult(
+                0, ""
+            ),
+            (
+                "git", "show-ref", "--verify", "--quiet", "refs/heads/feature/work-123"
+            ): LocalCommandResult(1, ""),
+            (
+                "git", "ls-remote", "--exit-code", "--heads", "origin", "feature/work-123"
+            ): LocalCommandResult(2, ""),
+            ("git", "switch", "-c", "feature/work-123"): LocalCommandResult(0, ""),
+            ("git", "rev-parse", "HEAD"): LocalCommandResult(0, "a" * 40 + "\n"),
+        }
+    )
+    worktree = TrustedWorktree(
+        replace(config(), work_branch_template="feature/work-{issue}"),
+        runner,
+        Path("/repo"),
+        {"PATH": "/usr/bin"},
+    )
+
+    prepared = worktree.prepare(HostTarget(123, True, None, None, False, False, 1, None))
+
+    assert prepared is not None
+    assert prepared.branch == "feature/work-123"
+    assert ("git", "switch", "-c", "loop/work-123") not in runner.commands
 
 
 def test_existing_pr_is_prepared_without_codex_git_write() -> None:

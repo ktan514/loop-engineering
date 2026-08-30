@@ -110,6 +110,16 @@ trunk_branch = rebuild/v2-foundation
 project_owner = ktan514
 project_number = 7
 mission_issue = 450
+work_branch_template = feature/work-{issue}
+
+[self_improvement]
+enabled = true
+repository = ktan514/loop-engineering
+project_owner = ktan514
+project_number = 9
+label = loop-engineering
+area = Runtime / Infrastructure
+issue_level = Work
 
 [models]
 implementer_provider = codex
@@ -149,6 +159,10 @@ Profile/Host設定で指定してよいもの:
 - verification policy mapping
 - product-specific command/test descriptors
 - safe path scopes
+
+Product Workのbranch名は`work_branch_template`で宣言する。templateは`{issue}`を1回だけ含む安全なGit refでなければならず、任意shell、空branch、`..`、path traversal、危険なref文字を許可しない。
+
+自己改善Issueの公開先は`[self_improvement]`で指定し、ProductのRepository、Project、labelとは別の設定境界とする。`enabled = false`またはsection未設定なら自己改善のGitHub mutationは行わない。別Product targetで公開先が未設定の場合、Product Repositoryへ暗黙fallbackしない。
 
 ## 6. Forbidden profile responsibilities
 

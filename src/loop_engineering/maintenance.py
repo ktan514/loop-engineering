@@ -47,6 +47,8 @@ class SelfImprovementController:
     ) -> MaintenancePublication:
         published: list[ImprovementPublishResult] = []
         failures: list[ImprovementPublishFailure] = []
+        if not self.config.self_improvement.enabled:
+            return MaintenancePublication((), ())
         for candidate in candidates:
             try:
                 published.append(
