@@ -147,7 +147,7 @@ class TrustedWorktree:
         return FinalizedWorktree(prepared.branch, head_sha, pr_number)
 
     def abort_merge_if_needed(self, prepared: PreparedWorktree | None) -> bool:
-        """reconciliation途中ならabortし、開始前のclean状態へ戻ったことまで確認する。"""
+        """reconciliation途中なら開始前のclean状態へ戻ったことまで確認する。"""
 
         if prepared is None or not prepared.reconciliation_started:
             self._last_reconciliation_cleanup_failed = False
@@ -155,24 +155,62 @@ class TrustedWorktree:
 
         merge_head = self._git(("rev-parse", "-q", "--verify", "MERGE_HEAD"))
         if merge_head.succeeded:
-            if not self._git(("merge", "--abort")).succeeded:
-                self._last_reconciliation_cleanup_failed = True
-                return False
+            abort = self._git(("merge", "--abort"))
+            if not abort.succeeded:
+                cleaned = self._hard_reset_after_abort_failure(prepared)
+                self._last_reconciliation_cleanup_failed = not cleaned
+                return cleaned
         elif merge_head.returncode != 1:
             self._last_reconciliation_cleanup_failed = True
             return False
 
+        cleaned = self._cleanup_readback(prepared)
+        self._last_reconciliation_cleanup_failed = not cleaned
+        return cleaned
+
+    def _hard_reset_after_abort_failure(self, prepared: PreparedWorktree) -> bool:
+        """abort失敗時、安全条件をfresh確認できる場合だけ開始HEADへ戻す。"""
+
+        if prepared.pr_number is None:
+            return False
+
+        current_branch = self._git_output(("branch", "--show-current"))
         current_head = self._git_output(("rev-parse", "HEAD"))
-        merge_head_after = self._git(("rev-parse", "-q", "--verify", "MERGE_HEAD"))
+        merge_head = self._git(("rev-parse", "-q", "--verify", "MERGE_HEAD"))
+        if (
+            current_branch != prepared.branch
+            or current_head != prepared.start_head
+            or not merge_head.succeeded
+        ):
+            return False
+
+        pull = self._api_json(f"repos/{self._config.repository}/pulls/{prepared.pr_number}")
+        if pull is None:
+            return False
+        head_value = pull.get("head")
+        if not isinstance(head_value, dict):
+            return False
+        live_branch = head_value.get("ref")
+        live_head = head_value.get("sha")
+        if live_branch != prepared.branch or live_head != prepared.start_head:
+            return False
+
+        if not self._git(("reset", "--hard", prepared.start_head), timeout_seconds=180).succeeded:
+            return False
+        return self._cleanup_readback(prepared)
+
+    def _cleanup_readback(self, prepared: PreparedWorktree) -> bool:
+        current_branch = self._git_output(("branch", "--show-current"))
+        current_head = self._git_output(("rev-parse", "HEAD"))
+        merge_head = self._git(("rev-parse", "-q", "--verify", "MERGE_HEAD"))
         status = self._git_output(("status", "--porcelain"))
-        cleaned = (
-            current_head == prepared.start_head
-            and merge_head_after.returncode == 1
+        return (
+            current_branch == prepared.branch
+            and current_head == prepared.start_head
+            and merge_head.returncode == 1
             and status is not None
             and not status.strip()
         )
-        self._last_reconciliation_cleanup_failed = not cleaned
-        return cleaned
 
     def _finalize_failed(
         self,
