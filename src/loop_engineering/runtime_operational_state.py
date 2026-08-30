@@ -59,6 +59,13 @@ class OperationalStatePort(Protocol):
 
     def release_lease(self, project_key: str, run_identity: str) -> None: ...
 
+    def resolve_open_states(
+        self,
+        project_key: str,
+        repository: str,
+        current_run_identity: str,
+    ) -> None: ...
+
     def record_blocker(self, run_identity: str, result: HostTransitionResult) -> None: ...
 
     def record_external_wait(self, run_identity: str, result: HostTransitionResult) -> None: ...
@@ -209,14 +216,39 @@ class PostgreSQLRuntimeOperationalStore:
             "AND status = 'ACTIVE'"
         )
 
+    def resolve_open_states(
+        self,
+        project_key: str,
+        repository: str,
+        current_run_identity: str,
+    ) -> None:
+        project = _literal(project_key)
+        repo = _literal(repository)
+        current = _literal(current_run_identity)
+        prior_runs = (
+            "SELECT identity FROM loop_runs "
+            f"WHERE project_key = {project} AND repository = {repo} "
+            f"AND identity <> {current}"
+        )
+        self._execute(
+            "UPDATE loop_blockers SET status = 'RESOLVED', resolved_at = now() "
+            "WHERE status = 'OPEN' AND run_identity IN ("
+            f"{prior_runs})"
+        )
+        self._execute(
+            "UPDATE loop_external_waits SET status = 'RESOLVED', resolved_at = now() "
+            "WHERE status = 'OPEN' AND run_identity IN ("
+            f"{prior_runs})"
+        )
+
     def record_blocker(self, run_identity: str, result: HostTransitionResult) -> None:
         target = _result_target_identity(result)
         identity = f"blocker:{run_identity}:1"
         self._execute(
             "INSERT INTO loop_blockers "
-            "(identity, scope, subject_identity, kind, reason_code, status) VALUES ("
-            f"{_literal(identity)}, 'host-transition', {_literal(target)}, "
-            f"'INTERVENTION_REQUIRED', {_literal(result.detail)}, 'OPEN') "
+            "(identity, run_identity, scope, subject_identity, kind, reason_code, status) VALUES ("
+            f"{_literal(identity)}, {_literal(run_identity)}, 'host-transition', "
+            f"{_literal(target)}, 'INTERVENTION_REQUIRED', {_literal(result.detail)}, 'OPEN') "
             "ON CONFLICT (identity) DO UPDATE SET status = 'OPEN', resolved_at = NULL"
         )
 
@@ -225,8 +257,9 @@ class PostgreSQLRuntimeOperationalStore:
         identity = f"external-wait:{run_identity}:1"
         self._execute(
             "INSERT INTO loop_external_waits "
-            "(identity, kind, target_identity, status) VALUES ("
-            f"{_literal(identity)}, {_literal(result.detail)}, {_literal(target)}, 'OPEN') "
+            "(identity, run_identity, kind, target_identity, status) VALUES ("
+            f"{_literal(identity)}, {_literal(run_identity)}, {_literal(result.detail)}, "
+            f"{_literal(target)}, 'OPEN') "
             "ON CONFLICT (identity) DO UPDATE SET status = 'OPEN', resolved_at = NULL"
         )
 
@@ -296,6 +329,11 @@ class DurableHostTransitionCoordinator:
         result = self._controller.run_once()
         try:
             self._store.record_transition(run_identity, 1, result)
+            self._store.resolve_open_states(
+                self._project_key,
+                self._repository,
+                run_identity,
+            )
             if result.status is HostTransitionStatus.INTERVENTION_REQUIRED:
                 self._store.record_blocker(run_identity, result)
             elif result.status is HostTransitionStatus.YIELD_EXTERNAL:
