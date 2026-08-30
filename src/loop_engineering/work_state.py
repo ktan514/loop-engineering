@@ -16,6 +16,8 @@ class WorkStateDatabase(Protocol):
 
     def query_json_rows(self, select_sql: str) -> list[dict[str, object]] | None: ...
 
+    def execute_transaction_json(self, sql: str) -> dict[str, object] | None: ...
+
 
 @dataclass(frozen=True, slots=True)
 class WorkRecord:
@@ -62,6 +64,14 @@ class EffectAttempt:
     target_identity: str
     status: str
     request_identity: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkLease:
+    work_identity: str
+    holder_identity: str
+    packet_generation: int
+    lease_seconds: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,6 +212,37 @@ class PostgreSQLWorkStateStore:
             f"WHERE idempotency_key = {_literal(idempotency_key)} "
             "AND status = 'INTENT_RECORDED'"
         )
+
+    def issue_packet_transaction(
+        self,
+        *,
+        record: WorkRecord,
+        lease: WorkLease,
+        packet: WorkTaskPacket,
+        effect: EffectAttempt,
+        checkpoint: WorkCheckpoint,
+    ) -> bool:
+        """lease、packet、effect意図、Checkpointを単一transactionで確定する。"""
+        if (
+            record.identity != lease.work_identity
+            or packet.work_identity != record.identity
+            or checkpoint.work_identity != record.identity
+            or effect.work_identity != record.identity
+            or checkpoint.task_packet_identity != packet.identity
+            or packet.status != "STARTED"
+            or effect.status != "INTENT_RECORDED"
+            or checkpoint.checkpoint_kind != "EFFECT_PENDING"
+            or packet.generation != lease.packet_generation
+            or lease.packet_generation < 1
+            or not 1 <= lease.lease_seconds <= 3600
+        ):
+            raise WorkStateUnavailable("TRANSACTION_PACKET_INVALID")
+        result = self._database.execute_transaction_json(
+            _issue_packet_transaction_sql(record, lease, packet, effect, checkpoint)
+        )
+        if result is None:
+            raise WorkStateUnavailable("WORK_STATE_TRANSACTION_FAILED")
+        return result.get("acquired") is True
 
     def recover(self, work_identity: str) -> RecoveredWork | None:
         records = self._query(
@@ -348,4 +389,77 @@ def _work_record(row: dict[str, object]) -> WorkRecord:
         active_lineage_identity=_optional_string(row, "active_lineage_identity"),
         latest_task_packet_identity=_optional_string(row, "latest_task_packet_identity"),
         latest_checkpoint_identity=_optional_string(row, "latest_checkpoint_identity"),
+    )
+
+
+def _issue_packet_transaction_sql(
+    record: WorkRecord,
+    lease: WorkLease,
+    packet: WorkTaskPacket,
+    effect: EffectAttempt,
+    checkpoint: WorkCheckpoint,
+) -> str:
+    """副作用前に必要な永続状態を1文のPostgreSQL transactionで確定する。"""
+    return (
+        "WITH eligible AS ("
+        "SELECT identity FROM loop_work_records "
+        f"WHERE identity = {_literal(record.identity)} "
+        "AND NOT EXISTS (SELECT 1 FROM loop_task_packets "
+        f"WHERE identity = {_literal(packet.identity)} OR "
+        f"(work_identity = {_literal(packet.work_identity)} AND generation = {packet.generation})) "
+        "AND NOT EXISTS (SELECT 1 FROM loop_effect_attempts "
+        f"WHERE idempotency_key = {_literal(effect.idempotency_key)}) "
+        "AND NOT EXISTS (SELECT 1 FROM loop_work_checkpoints "
+        f"WHERE identity = {_literal(checkpoint.identity)})"
+        "), acquired AS ("
+        "INSERT INTO loop_work_leases "
+        "(work_identity, holder_identity, packet_generation, expires_at) SELECT "
+        f"{_literal(lease.work_identity)}, {_literal(lease.holder_identity)}, "
+        f"{lease.packet_generation}, now() + INTERVAL '{lease.lease_seconds} seconds' "
+        "FROM eligible "
+        "ON CONFLICT (work_identity) DO UPDATE SET "
+        "holder_identity = EXCLUDED.holder_identity, "
+        "packet_generation = EXCLUDED.packet_generation, "
+        "acquired_at = now(), expires_at = EXCLUDED.expires_at "
+        "WHERE loop_work_leases.expires_at <= now() "
+        "RETURNING work_identity"
+        "), recorded_packet AS ("
+        "INSERT INTO loop_task_packets "
+        "(identity, work_identity, generation, transition, status, canonical_design_identities, "
+        "external_target_identities) SELECT "
+        f"{_literal(packet.identity)}, {_literal(packet.work_identity)}, {packet.generation}, "
+        f"{_literal(packet.transition)}, 'STARTED', "
+        f"{_json_literal(packet.canonical_design_identities)}, "
+        f"{_json_literal(packet.external_target_identities)} FROM acquired "
+        "ON CONFLICT (identity) DO NOTHING RETURNING identity"
+        "), recorded_effect AS ("
+        "INSERT INTO loop_effect_attempts "
+        "(idempotency_key, work_identity, kind, target_identity, status, request_identity) SELECT "
+        f"{_literal(effect.idempotency_key)}, {_literal(effect.work_identity)}, "
+        f"{_literal(effect.kind)}, {_literal(effect.target_identity)}, 'INTENT_RECORDED', "
+        f"{_nullable_literal(effect.request_identity)} FROM recorded_packet "
+        "ON CONFLICT (idempotency_key) DO NOTHING RETURNING idempotency_key"
+        "), recorded_checkpoint AS ("
+        "INSERT INTO loop_work_checkpoints "
+        "(identity, work_identity, run_identity, task_packet_identity, checkpoint_kind, "
+        "resumable_state, next_action, external_target_identities, evidence_identities) SELECT "
+        f"{_literal(checkpoint.identity)}, {_literal(checkpoint.work_identity)}, "
+        f"{_literal(checkpoint.run_identity)}, {_literal(packet.identity)}, 'EFFECT_PENDING', "
+        f"{_literal(checkpoint.resumable_state)}, {_literal(checkpoint.next_action)}, "
+        f"{_json_literal(checkpoint.external_target_identities)}, "
+        f"{_json_literal(checkpoint.evidence_identities)} FROM recorded_effect "
+        "ON CONFLICT (identity) DO NOTHING RETURNING identity"
+        "), updated_work AS ("
+        "UPDATE loop_work_records SET "
+        f"issue_revision = {_literal(record.issue_revision)}, "
+        f"lifecycle = {_literal(record.lifecycle)}, "
+        f"selected_transition = {_nullable_literal(record.selected_transition)}, "
+        f"active_lineage_identity = {_nullable_literal(record.active_lineage_identity)}, "
+        f"latest_task_packet_identity = {_literal(packet.identity)}, "
+        f"latest_checkpoint_identity = {_literal(checkpoint.identity)}, updated_at = now() "
+        "WHERE identity = (SELECT identity FROM acquired) "
+        "AND EXISTS (SELECT 1 FROM recorded_checkpoint) RETURNING identity"
+        ") SELECT json_build_object("
+        "'acquired', EXISTS (SELECT 1 FROM updated_work)"
+        ")::text"
     )

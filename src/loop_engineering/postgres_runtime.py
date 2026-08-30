@@ -162,6 +162,22 @@ class PostgreSQLCommandAdapter:
             return None
         return [cast(dict[str, object], item) for item in payload]
 
+    def execute_transaction_json(self, sql: str) -> dict[str, object] | None:
+        """1つのSQL文として実行したtransactionのJSON結果を読み戻す。"""
+        parsed = self._parsed_dsn()
+        if parsed is None or self._driver not in self._DRIVERS:
+            return None
+        if self._driver == "docker" and not self._container:
+            return None
+        result = self._run_client(("psql", "-Atqc", sql), parsed)
+        if not result.succeeded:
+            return None
+        try:
+            payload = json.loads(result.output.strip())
+        except json.JSONDecodeError:
+            return None
+        return cast(dict[str, object], payload) if isinstance(payload, dict) else None
+
     def _migrations_current(self, parsed: _ParsedDSN) -> bool:
         expected = {path.name for path in self._migration_files()}
         if not expected:

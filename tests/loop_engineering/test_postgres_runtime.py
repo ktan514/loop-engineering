@@ -14,9 +14,10 @@ class Result:
 
 
 class RecordingRunner:
-    def __init__(self, migration_output: str = "") -> None:
+    def __init__(self, migration_output: str = "", output: str = "1\n") -> None:
         self.calls: list[tuple[tuple[str, ...], Mapping[str, str] | None]] = []
         self.migration_output = migration_output
+        self.output = output
 
     def run(
         self,
@@ -27,7 +28,7 @@ class RecordingRunner:
         self.calls.append((call, environment))
         if any("SELECT filename FROM loop_schema_migrations" in part for part in call):
             return Result(True, self.migration_output)
-        return Result(True, "1\n")
+        return Result(True, self.output)
 
 
 def _environment() -> dict[str, str]:
@@ -126,3 +127,17 @@ def test_invalid_dsn_fails_without_running_commands(tmp_path: Path) -> None:
     assert not result.succeeded
     assert result.detail == "POSTGRES_DSN_INVALID"
     assert runner.calls == []
+
+
+def test_transaction_result_is_json_and_uses_one_psql_statement() -> None:
+    runner = RecordingRunner(output='{"acquired":true}\n')
+    adapter = PostgreSQLCommandAdapter(runner, _environment())
+
+    result = adapter.execute_transaction_json(
+        "WITH state AS (SELECT 1) SELECT '{\"acquired\":true}'"
+    )
+
+    assert result == {"acquired": True}
+    command = runner.calls[0][0]
+    assert command[:3] == ("docker", "exec", "-e")
+    assert "WITH state AS" in " ".join(command)
