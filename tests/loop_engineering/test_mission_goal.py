@@ -45,6 +45,48 @@ def test_host_registry_is_used_when_product_has_no_legacy_goal(tmp_path: Path) -
     assert len(values["CODEX_MISSION_GOAL_SHA256"]) == 64
 
 
+def test_host_registry_wins_over_existing_legacy_product_goal(tmp_path: Path) -> None:
+    platform_root = tmp_path / "platform"
+    product_root = tmp_path / "product"
+    legacy = product_root / "docs" / "operations" / "loop_mission_goal.md"
+    registry = platform_root / "config" / "goals" / "ktan514__ai-liver-yura.md"
+    _write_goal(legacy, version="4", generation="8")
+    _write_goal(registry, version="5", generation="1")
+
+    values = inject_mission_goal_environment(
+        platform_root=platform_root,
+        product_root=product_root,
+        repository="ktan514/ai-liver-yura",
+        environment={},
+    )
+
+    assert values["LOOP_MISSION_GOAL_PATH"] == str(registry.resolve())
+    assert values["CODEX_MISSION_GOAL_VERSION"] == "5"
+    assert values["CODEX_MISSION_GOAL_GENERATION"] == "1"
+
+
+def test_explicit_host_goal_wins_over_registry_and_legacy_goal(tmp_path: Path) -> None:
+    platform_root = tmp_path / "platform"
+    product_root = tmp_path / "product"
+    legacy = product_root / "docs" / "operations" / "loop_mission_goal.md"
+    registry = platform_root / "config" / "goals" / "ktan514__ai-liver-yura.md"
+    explicit = tmp_path / "explicit-goal.md"
+    _write_goal(legacy, version="4", generation="8")
+    _write_goal(registry, version="5", generation="1")
+    _write_goal(explicit, version="6", generation="2")
+
+    values = inject_mission_goal_environment(
+        platform_root=platform_root,
+        product_root=product_root,
+        repository="ktan514/ai-liver-yura",
+        environment={"LOOP_MISSION_GOAL_PATH": str(explicit)},
+    )
+
+    assert values["LOOP_MISSION_GOAL_PATH"] == str(explicit.resolve())
+    assert values["CODEX_MISSION_GOAL_VERSION"] == "6"
+    assert values["CODEX_MISSION_GOAL_GENERATION"] == "2"
+
+
 def test_explicit_missing_goal_fails_closed_without_registry_fallback(tmp_path: Path) -> None:
     platform_root = tmp_path / "platform"
     product_root = tmp_path / "product"
