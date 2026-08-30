@@ -273,3 +273,22 @@ def test_legacy_self_target_configuration_is_migrated_only_at_platform_root(tmp_
 
     assert settings.engine.self_improvement.enabled
     assert settings.engine.self_improvement.repository == "owner/product"
+
+
+def test_distributed_example_configuration_loads_after_workspace_replacement(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    template = root / "config" / "loop-engineering.example.ini"
+    config = tmp_path / "loop-engineering.ini"
+    config.write_text(
+        template.read_text(encoding="utf-8").replace(
+            "/absolute/path/to/product-workspace", str(tmp_path / "workspace")
+        ),
+        encoding="utf-8",
+    )
+
+    settings = LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+
+    assert settings.engine.repository == "owner/repository"
+    assert settings.engine.self_improvement.authority_refs == ()
