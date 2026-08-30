@@ -174,7 +174,10 @@ class TrustedWorktree:
         self._last_reconciliation_cleanup_failed = not cleaned
         return cleaned
 
-    def _finalize_failed(self, prepared: PreparedWorktree) -> None:
+    def _finalize_failed(
+        self,
+        prepared: PreparedWorktree,
+    ) -> FinalizedWorktree | None:
         if prepared.reconciliation_started:
             self.abort_merge_if_needed(prepared)
         return None
