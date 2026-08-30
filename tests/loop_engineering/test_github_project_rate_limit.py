@@ -3,6 +3,9 @@ import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from pytest import MonkeyPatch
+
+from loop_engineering import host_entrypoint
 from loop_engineering.durable_host_entrypoint import (
     _project_rate_limit_is_only_blocker,
     _record_preflight_external_wait,
@@ -112,6 +115,20 @@ def _environment(root: Path) -> dict[str, str]:
     }
 
 
+def _rate_limited_preflight() -> PreflightResult:
+    return PreflightResult(
+        PreflightStatus.BLOCKED,
+        {},
+        ("GITHUB_PROJECT_READ", "GITHUB_PROJECT_WRITE"),
+        (),
+        (
+            "GITHUB_PROJECT_READ",
+            "GITHUB_PROJECT_WRITE",
+            "GITHUB_PROJECT_RATE_LIMITED",
+        ),
+    )
+
+
 def test_project_capability_uses_one_small_graphql_probe(tmp_path: Path) -> None:
     runner = ProjectProbeRunner(tmp_path)
     result = EnvironmentCapabilityPreflight(
@@ -151,17 +168,7 @@ def test_project_rate_limit_is_typed_without_exposing_raw_error(tmp_path: Path) 
 
 
 def test_only_project_rate_limit_blockers_are_external_wait_eligible() -> None:
-    rate_limited = PreflightResult(
-        PreflightStatus.BLOCKED,
-        {},
-        ("GITHUB_PROJECT_READ", "GITHUB_PROJECT_WRITE"),
-        (),
-        (
-            "GITHUB_PROJECT_READ",
-            "GITHUB_PROJECT_WRITE",
-            "GITHUB_PROJECT_RATE_LIMITED",
-        ),
-    )
+    rate_limited = _rate_limited_preflight()
     mixed = PreflightResult(
         PreflightStatus.BLOCKED,
         {},
@@ -176,6 +183,33 @@ def test_only_project_rate_limit_blockers_are_external_wait_eligible() -> None:
 
     assert _project_rate_limit_is_only_blocker(rate_limited)
     assert not _project_rate_limit_is_only_blocker(mixed)
+
+
+def test_non_durable_host_maps_project_rate_limit_to_external_wait(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    class RateLimitedPreflight:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+
+        def run(self) -> PreflightResult:
+            return _rate_limited_preflight()
+
+    monkeypatch.setattr(host_entrypoint, "EnvironmentCapabilityPreflight", RateLimitedPreflight)
+    monkeypatch.setattr(
+        host_entrypoint,
+        "inject_mission_goal_environment",
+        lambda **kwargs: dict(kwargs["environment"]),
+    )
+
+    result = host_entrypoint.run_actual_host_transition(
+        root=tmp_path,
+        environment={},
+        config=config(),
+    )
+
+    assert result.status is HostTransitionStatus.YIELD_EXTERNAL
+    assert result.detail == "GITHUB_PROJECT_RATE_LIMIT"
 
 
 def test_preflight_external_wait_is_persisted_as_terminal_yield() -> None:
