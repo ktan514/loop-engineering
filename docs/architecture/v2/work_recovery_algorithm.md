@@ -10,6 +10,8 @@ V2は、Issue comment、会話、古い外部観測から現在作業を推測�
 
 この文書は`work_state_and_issue_boundary.md`の責務境界を、実行可能な決定アルゴリズムへ具体化する。
 
+接続層、Host合成、切替、受入試験は`v2_adapters_cutover_and_acceptance.md`を正本とする。
+
 ## 2. 入力と出力
 
 1回の再開判定の入力は次だけである。
