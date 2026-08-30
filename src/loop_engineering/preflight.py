@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import socket
@@ -14,6 +13,7 @@ from typing import Protocol
 from urllib.parse import urlsplit
 
 from .config import LoopEngineConfig, LoopEngineeringSettings
+from .mission_goal import inject_mission_goal_environment, read_mission_goal_identity
 
 
 class PreflightStatus(str, Enum):
@@ -342,18 +342,19 @@ class EnvironmentCapabilityPreflight:
         }
 
     def _mission_goal_matches(self) -> bool:
-        source = self._project_root / "docs" / "operations" / "loop_mission_goal.md"
-        generation = self._environment.get("CODEX_MISSION_GOAL_GENERATION")
-        version = self._environment.get("CODEX_MISSION_GOAL_VERSION")
-        content_hash = self._environment.get("CODEX_MISSION_GOAL_SHA256")
-        if not source.is_file() or not all((generation, version, content_hash)):
+        raw_path = self._environment.get("LOOP_MISSION_GOAL_PATH", "").strip()
+        source = (
+            Path(raw_path).expanduser().resolve(strict=False)
+            if raw_path
+            else self._project_root / "docs" / "operations" / "loop_mission_goal.md"
+        )
+        identity = read_mission_goal_identity(source)
+        if identity is None:
             return False
-        content = source.read_bytes()
-        lines = content.decode("utf-8").splitlines()
         return (
-            f"generation: {generation}" in lines
-            and f"version: {version}" in lines
-            and hashlib.sha256(content).hexdigest() == content_hash
+            self._environment.get("CODEX_MISSION_GOAL_GENERATION") == identity.generation
+            and self._environment.get("CODEX_MISSION_GOAL_VERSION") == identity.version
+            and self._environment.get("CODEX_MISSION_GOAL_SHA256") == identity.sha256
         )
 
     def _run(
@@ -387,7 +388,12 @@ def _repository_from_remote(value: str) -> str | None:
 def main() -> None:
     platform_root = Path(__file__).resolve().parents[2]
     settings = LoopEngineeringSettings.load(platform_root)
-    environment = settings.canonical_environment()
+    environment = inject_mission_goal_environment(
+        platform_root=platform_root,
+        product_root=settings.workspace_path,
+        repository=settings.engine.repository,
+        environment=settings.canonical_environment(),
+    )
     print(
         EnvironmentCapabilityPreflight(
             settings.engine,
