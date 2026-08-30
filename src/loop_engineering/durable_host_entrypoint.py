@@ -32,6 +32,9 @@ from .runtime_operational_state import (
     PostgreSQLRuntimeOperationalStore,
 )
 
+_PROJECT_RATE_LIMIT_DIAGNOSTIC = "GITHUB_PROJECT_RATE_LIMITED"
+_PROJECT_BLOCKERS = {"GITHUB_PROJECT_READ", "GITHUB_PROJECT_WRITE"}
+
 
 def run_durable_actual_host_transition(
     *,
@@ -81,6 +84,11 @@ def run_durable_actual_host_transition(
         project_root=project_root,
     ).run()
     if preflight.status is PreflightStatus.BLOCKED:
+        if _project_rate_limit_is_only_blocker(preflight):
+            return HostTransitionResult(
+                HostTransitionStatus.YIELD_EXTERNAL,
+                "GITHUB_PROJECT_RATE_LIMIT",
+            )
         return HostTransitionResult(
             HostTransitionStatus.INTERVENTION_REQUIRED,
             "PREFLIGHT_BLOCKED:" + ",".join(preflight.blocking_for_loop_bootstrap),
@@ -119,3 +127,13 @@ def run_durable_actual_host_transition(
         store=store,
         required=required,
     ).run_once()
+
+
+def _project_rate_limit_is_only_blocker(preflight: object) -> bool:
+    diagnostics = getattr(preflight, "diagnostics", ())
+    blockers = set(getattr(preflight, "blocking_for_loop_bootstrap", ()))
+    return (
+        _PROJECT_RATE_LIMIT_DIAGNOSTIC in diagnostics
+        and bool(blockers)
+        and blockers <= _PROJECT_BLOCKERS
+    )
