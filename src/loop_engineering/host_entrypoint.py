@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -23,6 +22,7 @@ from .host_runtime import (
     MissionPort,
     SubprocessLocalRunner,
 )
+from .mission_goal import inject_mission_goal_environment
 from .preflight import (
     EnvironmentCapabilityPreflight,
     PreflightStatus,
@@ -439,14 +439,20 @@ def run_actual_host_transition(
     config: LoopEngineConfig | None = None,
 ) -> HostTransitionResult:
     project_root = root or Path(__file__).resolve().parents[2]
-    values = _canonical_goal_environment(project_root, environment or os.environ)
+    base_values = dict(environment or os.environ)
     try:
-        resolved_config = config or LoopEngineConfig.from_environment(values)
+        resolved_config = config or LoopEngineConfig.from_environment(base_values)
     except ValueError:
         return HostTransitionResult(
             HostTransitionStatus.INTERVENTION_REQUIRED,
             "CONFIGURATION_INVALID",
         )
+    values = inject_mission_goal_environment(
+        platform_root=Path(__file__).resolve().parents[2],
+        product_root=project_root,
+        repository=resolved_config.repository,
+        environment=base_values,
+    )
     preflight = EnvironmentCapabilityPreflight(
         resolved_config,
         SubprocessCommandRunner(),
@@ -482,34 +488,6 @@ def run_actual_host_transition(
         mission,
         implementer,
     ).run_once()
-
-
-def _canonical_goal_environment(
-    root: Path,
-    environment: Mapping[str, str],
-) -> dict[str, str]:
-    values = dict(environment)
-    goal = root / "docs" / "operations" / "loop_mission_goal.md"
-    if not goal.is_file():
-        return values
-    content = goal.read_bytes()
-    lines = content.decode("utf-8").splitlines()
-    version = next(
-        (line.removeprefix("version: ") for line in lines if line.startswith("version: ")),
-        "",
-    )
-    generation = next(
-        (
-            line.removeprefix("generation: ")
-            for line in lines
-            if line.startswith("generation: ")
-        ),
-        "",
-    )
-    values["CODEX_MISSION_GOAL_VERSION"] = version
-    values["CODEX_MISSION_GOAL_GENERATION"] = generation
-    values["CODEX_MISSION_GOAL_SHA256"] = hashlib.sha256(content).hexdigest()
-    return values
 
 
 def _codex_argv(environment: Mapping[str, str]) -> tuple[str, ...]:
