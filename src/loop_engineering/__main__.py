@@ -13,6 +13,8 @@ from .runtime_console import RuntimeConsole, VisibleSubprocessLocalRunner
 
 _CI_RECHECK_INITIAL_SECONDS = 60.0
 _CI_RECHECK_MAX_SECONDS = 300.0
+_PROJECT_RECHECK_INITIAL_SECONDS = 300.0
+_PROJECT_RECHECK_MAX_SECONDS = 900.0
 _MAX_IDENTICAL_COMPLETED = 3
 
 
@@ -141,13 +143,14 @@ def main() -> int:
     runner = VisibleSubprocessLocalRunner(console)
     mode = "once" if arguments.once else "continuous"
     mode_label = "1回実行" if arguments.once else "継続実行"
-    console.event(f"開始 mode={mode}（{mode_label}） project={settings.project_key}")
-    console.event(f"設定: {settings.config_path}")
-    console.event(f"対象Workspace: {workspace_root}")
+    console.event(f"Start: mode={mode}（{mode_label}） project={settings.project_key}")
+    console.event(f"Config: {settings.config_path}")
+    console.event(f"Target Workspace: {workspace_root}")
     console.event(f"Mission Goal: {environment['LOOP_MISSION_GOAL_PATH']}")
-    console.event(f"ログ: {console.path}")
+    console.event(f"Log: {console.path}")
 
     ci_wait_seconds = _CI_RECHECK_INITIAL_SECONDS
+    project_wait_seconds = _PROJECT_RECHECK_INITIAL_SECONDS
     previous_completed: tuple[str, int | None, int | None, str | None] | None = None
     identical_completed = 0
     transition_number = 0
@@ -155,7 +158,7 @@ def main() -> int:
     try:
         while True:
             transition_number += 1
-            console.event(f"遷移 {transition_number}: 開始")
+            console.event(f"Transition {transition_number}: Start")
             transition_result = run_durable_actual_host_transition(
                 root=workspace_root,
                 environment=environment,
@@ -164,8 +167,8 @@ def main() -> int:
                 project_key=settings.project_key,
             )
             console.event(
-                f"遷移 {transition_number}: "
-                f"{transition_result.status.value} 詳細={transition_result.detail}"
+                f"Transition {transition_number}: "
+                f"{transition_result.status.value} detail={transition_result.detail}"
             )
 
             if arguments.once:
@@ -192,11 +195,12 @@ def main() -> int:
                         transition_result.pr_number,
                         transition_result.head_sha,
                     )
-                    console.event("進捗停止検知: 同一の完了遷移が繰り返されました")
+                    console.event("Progress Guard: 同一の完了遷移が繰り返されました")
                     print(blocked.as_json())
                     return 3
                 ci_wait_seconds = _CI_RECHECK_INITIAL_SECONDS
-                console.event("継続: 現在状態を再観測します")
+                project_wait_seconds = _PROJECT_RECHECK_INITIAL_SECONDS
+                console.event("Continue: 現在状態をfresh observeします")
                 continue
 
             previous_completed = None
@@ -207,7 +211,7 @@ def main() -> int:
                 and transition_result.detail == "CI_PENDING"
             ):
                 console.event(
-                    f"CI待機: {int(ci_wait_seconds)}秒後に自動再開します"
+                    f"CI Wait: {int(ci_wait_seconds)}秒後に自動再開します"
                 )
                 time.sleep(ci_wait_seconds)
                 ci_wait_seconds = min(
@@ -216,10 +220,25 @@ def main() -> int:
                 )
                 continue
 
+            if (
+                transition_result.status is HostTransitionStatus.YIELD_EXTERNAL
+                and transition_result.detail == "GITHUB_PROJECT_RATE_LIMIT"
+            ):
+                console.event(
+                    "External Wait: GitHub Project API rate limitのため"
+                    f"{int(project_wait_seconds)}秒後にfresh readから自動再開します"
+                )
+                time.sleep(project_wait_seconds)
+                project_wait_seconds = min(
+                    project_wait_seconds * 2,
+                    _PROJECT_RECHECK_MAX_SECONDS,
+                )
+                continue
+
             print(transition_result.as_json())
             return _exit_code(transition_result)
     except KeyboardInterrupt:
-        console.event("操作者の要求により停止します")
+        console.event("Operator Stop: 操作者の要求により停止します")
         return 130
 
 

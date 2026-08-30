@@ -34,7 +34,6 @@ class PolicyPreflight(EnvironmentCapabilityPreflight):
         return {
             "github_cli": True,
             "github_repo_read": True,
-            "github_project_read": True,
             "python": True,
             "pytest": True,
             "ruff": True,
@@ -56,8 +55,8 @@ class PolicyPreflight(EnvironmentCapabilityPreflight):
     def _repository_write_allowed(self) -> bool:
         return True
 
-    def _project_write_allowed(self) -> bool:
-        return True
+    def _project_access(self) -> tuple[bool, bool]:
+        return True, True
 
     def _mission_goal_matches(self) -> bool:
         return True

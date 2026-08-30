@@ -48,6 +48,8 @@ _NEXT_WORK_SELECTION_RE = re.compile(
     r"(?im)^.*?(?:next\s+action|次(?:の)?action|次の作業)(?:\s*(?:は|:))?\s*"
     r".*?(?:next\s+.*?Work|次.*?Work).*?(?:select|選択)"
 )
+_PROJECT_RATE_LIMIT_DIAGNOSTIC = "GITHUB_PROJECT_RATE_LIMITED"
+_PROJECT_BLOCKERS = {"GITHUB_PROJECT_READ", "GITHUB_PROJECT_WRITE"}
 
 
 class StrictGhMissionPort(GhMissionPort):
@@ -243,6 +245,8 @@ class PilotPlanningImplementer(CodexImplementer):
             f"{task}"
             "GitHubの現在状態、最新Mission Checkpoint、現在基幹、Repository正本、"
             "Work固有の再開確認と依存状態をfresh readしてください。"
+            "Projectのfull item-listが必要な場合は1遷移につき1回だけ取得し、"
+            "同じ遷移内ではそのfresh結果を再利用してください。"
             "設計→コード→テストの順序を守ってください。"
             "コードや文書内の人間向け文章は日本語で記述してください。"
             "Gitのbranch作成・切替・merge・add・commit・push・rebase・force pushは"
@@ -268,6 +272,7 @@ class PilotPlanningImplementer(CodexImplementer):
             f"統合Work #{integration} は基盤統合後の実製品試験証拠待ちです。"
             f"Project #{self._config.project_number}とGitHub上の現在Issue/PRをfresh readし、"
             "依存関係を満たした製品Workまたは統合Workを1件選択してください。"
+            "Projectのfull item-listはこの遷移で1回だけ取得し、同じfresh結果を再利用してください。"
             f"#{integration}自身とLoop Engineering基盤責務は試験候補から除外してください。"
             "依存関係を満たした製品Workが無い場合は、外部または依存待ちをCheckpointへ明示してください。"
             "Repositoryコード・設計file・branch・PRを変更せず、mergeやreviewも実行しないでください。"
@@ -460,6 +465,16 @@ def run_actual_host_transition(
         project_root=project_root,
     ).run()
     if preflight.status is PreflightStatus.BLOCKED:
+        blockers = set(preflight.blocking_for_loop_bootstrap)
+        if (
+            _PROJECT_RATE_LIMIT_DIAGNOSTIC in preflight.diagnostics
+            and bool(blockers)
+            and blockers <= _PROJECT_BLOCKERS
+        ):
+            return HostTransitionResult(
+                HostTransitionStatus.YIELD_EXTERNAL,
+                "GITHUB_PROJECT_RATE_LIMIT",
+            )
         return HostTransitionResult(
             HostTransitionStatus.INTERVENTION_REQUIRED,
             "PREFLIGHT_BLOCKED:" + ",".join(preflight.blocking_for_loop_bootstrap),
