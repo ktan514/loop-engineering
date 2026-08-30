@@ -10,12 +10,14 @@ from loop_engineering.work_state import (
     WorkCheckpoint,
     WorkRecord,
     WorkStateUnavailable,
+    WorkTaskPacket,
 )
 
 
 @dataclass
 class Database:
     rows: list[dict[str, object]] = field(default_factory=list)
+    query_results: list[list[dict[str, object]]] | None = None
     statements: list[str] = field(default_factory=list)
     writable: bool = True
 
@@ -25,6 +27,8 @@ class Database:
 
     def query_json_rows(self, select_sql: str) -> list[dict[str, object]] | None:
         self.statements.append(select_sql)
+        if self.query_results is not None:
+            return self.query_results.pop(0)
         return self.rows
 
 
@@ -65,18 +69,20 @@ def test_work_and_checkpoint_are_persisted_without_issue_comment_text() -> None:
 
 def test_latest_checkpoint_reconstructs_db_state() -> None:
     database = Database(
-        rows=[
-            {
-                "identity": "checkpoint:62:2",
-                "work_identity": record().identity,
-                "run_identity": "run:2",
-                "task_packet_identity": None,
-                "checkpoint_kind": "EFFECT_PENDING",
-                "resumable_state": "MERGE_PENDING",
-                "next_action": "対象を照合する",
-                "external_target_identities": ["pr:63", "head:abc"],
-                "evidence_identities": ["ci:1"],
-            }
+        query_results=[
+            [
+                {
+                    "identity": "checkpoint:62:2",
+                    "work_identity": record().identity,
+                    "run_identity": "run:2",
+                    "task_packet_identity": None,
+                    "checkpoint_kind": "EFFECT_PENDING",
+                    "resumable_state": "MERGE_PENDING",
+                    "next_action": "対象を照合する",
+                    "external_target_identities": ["pr:63", "head:abc"],
+                    "evidence_identities": ["ci:1"],
+                }
+            ]
         ]
     )
 
@@ -86,6 +92,88 @@ def test_latest_checkpoint_reconstructs_db_state() -> None:
     assert checkpoint.checkpoint_kind == "EFFECT_PENDING"
     assert checkpoint.external_target_identities == ("pr:63", "head:abc")
     assert checkpoint.evidence_identities == ("ci:1",)
+
+
+def test_task_packet_and_pending_effects_are_recovered_from_db() -> None:
+    database = Database(
+        query_results=[
+            [
+                {
+                    "identity": record().identity,
+                    "repository": record().repository,
+                    "issue_number": 62,
+                    "issue_revision": "issue:62:2",
+                    "lifecycle": "RUNNING",
+                    "selected_transition": "IMPLEMENT",
+                    "active_lineage_identity": None,
+                    "latest_task_packet_identity": "packet:62:1",
+                    "latest_checkpoint_identity": "checkpoint:62:2",
+                }
+            ],
+            [
+                {
+                    "identity": "packet:62:1",
+                    "work_identity": record().identity,
+                    "generation": 1,
+                    "transition": "IMPLEMENT",
+                    "status": "ISSUED",
+                    "canonical_design_identities": ["design:62"],
+                    "external_target_identities": ["branch:feature/v2"],
+                }
+            ],
+            [
+                {
+                    "identity": "checkpoint:62:2",
+                    "work_identity": record().identity,
+                    "run_identity": "run:2",
+                    "task_packet_identity": "packet:62:1",
+                    "checkpoint_kind": "EFFECT_PENDING",
+                    "resumable_state": "IMPLEMENT_PENDING",
+                    "next_action": "対象を照合する",
+                    "external_target_identities": ["pr:63"],
+                    "evidence_identities": [],
+                }
+            ],
+            [
+                {
+                    "idempotency_key": "effect:62:1",
+                    "work_identity": record().identity,
+                    "kind": "PUSH",
+                    "target_identity": "branch:feature/v2",
+                    "status": "UNCERTAIN",
+                    "request_identity": None,
+                }
+            ],
+        ]
+    )
+    store = PostgreSQLWorkStateStore(database)
+
+    recovered = store.recover(record().identity)
+
+    assert recovered is not None
+    assert recovered.record.lifecycle == "RUNNING"
+    assert recovered.task_packet is not None
+    assert recovered.task_packet.transition == "IMPLEMENT"
+    assert recovered.checkpoint is not None
+    assert recovered.checkpoint.resumable_state == "IMPLEMENT_PENDING"
+    assert recovered.pending_effects[0].status == "UNCERTAIN"
+
+
+def test_task_packet_updates_recovery_pointer() -> None:
+    database = Database()
+    store = PostgreSQLWorkStateStore(database)
+
+    store.record_task_packet(
+        WorkTaskPacket(
+            identity="packet:62:1",
+            work_identity=record().identity,
+            generation=1,
+            transition="DESIGN",
+            status="ISSUED",
+        )
+    )
+
+    assert "latest_task_packet_identity = 'packet:62:1'" in "\n".join(database.statements)
 
 
 def test_effect_intent_is_idempotent_and_outcome_never_reenables_resend() -> None:

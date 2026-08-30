@@ -44,6 +44,17 @@ class WorkCheckpoint:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkTaskPacket:
+    identity: str
+    work_identity: str
+    generation: int
+    transition: str
+    status: str
+    canonical_design_identities: tuple[str, ...] = ()
+    external_target_identities: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class EffectAttempt:
     idempotency_key: str
     work_identity: str
@@ -53,13 +64,21 @@ class EffectAttempt:
     request_identity: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class RecoveredWork:
+    record: WorkRecord
+    task_packet: WorkTaskPacket | None
+    checkpoint: WorkCheckpoint | None
+    pending_effects: tuple[EffectAttempt, ...]
+
+
 class PostgreSQLWorkStateStore:
     """秘密を含まないV2作業状態だけをPostgreSQLへ保存する。"""
 
     _LIFECYCLES = frozenset({"PLANNED", "SELECTED", "RUNNING", "WAITING", "BLOCKED", "COMPLETED"})
     _CHECKPOINT_KINDS = frozenset({"SAFE_POINT", "EFFECT_PENDING", "EFFECT_CONFIRMED", "WAITING"})
     _EFFECT_STATUSES = frozenset({"INTENT_RECORDED", "CONFIRMED", "NO_EFFECT", "UNCERTAIN"})
-    _OUTBOX_STATUSES = frozenset({"PENDING", "PUBLISHED"})
+    _TASK_PACKET_STATUSES = frozenset({"ISSUED", "STARTED", "COMPLETED", "SUPERSEDED", "UNCERTAIN"})
 
     def __init__(self, database: WorkStateDatabase) -> None:
         self._database = database
@@ -108,6 +127,26 @@ class PostgreSQLWorkStateStore:
             "UPDATE loop_work_records SET "
             f"latest_checkpoint_identity = {_literal(checkpoint.identity)}, updated_at = now() "
             f"WHERE identity = {_literal(checkpoint.work_identity)}"
+        )
+
+    def record_task_packet(self, packet: WorkTaskPacket) -> None:
+        if packet.generation < 1 or packet.status not in self._TASK_PACKET_STATUSES:
+            raise WorkStateUnavailable("TASK_PACKET_INVALID")
+        self._execute(
+            "INSERT INTO loop_task_packets "
+            "(identity, work_identity, generation, transition, status, "
+            "canonical_design_identities, "
+            "external_target_identities) VALUES ("
+            f"{_literal(packet.identity)}, {_literal(packet.work_identity)}, {packet.generation}, "
+            f"{_literal(packet.transition)}, {_literal(packet.status)}, "
+            f"{_json_literal(packet.canonical_design_identities)}, "
+            f"{_json_literal(packet.external_target_identities)}) "
+            "ON CONFLICT (identity) DO NOTHING"
+        )
+        self._execute(
+            "UPDATE loop_work_records SET "
+            f"latest_task_packet_identity = {_literal(packet.identity)}, updated_at = now() "
+            f"WHERE identity = {_literal(packet.work_identity)}"
         )
 
     def latest_checkpoint(self, work_identity: str) -> WorkCheckpoint | None:
@@ -164,6 +203,21 @@ class PostgreSQLWorkStateStore:
             "AND status = 'INTENT_RECORDED'"
         )
 
+    def recover(self, work_identity: str) -> RecoveredWork | None:
+        records = self._query(
+            "SELECT identity, repository, issue_number, issue_revision, lifecycle, "
+            "selected_transition, active_lineage_identity, latest_task_packet_identity, "
+            "latest_checkpoint_identity FROM loop_work_records "
+            f"WHERE identity = {_literal(work_identity)} LIMIT 1"
+        )
+        if not records:
+            return None
+        record = _work_record(records[0])
+        packet = self._task_packet(record.latest_task_packet_identity)
+        checkpoint = self.latest_checkpoint(work_identity)
+        pending_effects = self._pending_effects(work_identity)
+        return RecoveredWork(record, packet, checkpoint, pending_effects)
+
     def enqueue_issue_report(
         self,
         *,
@@ -187,6 +241,51 @@ class PostgreSQLWorkStateStore:
         self._execute(
             "UPDATE loop_issue_report_outbox SET status = 'PUBLISHED', published_at = now() "
             f"WHERE identity = {_literal(identity)} AND status = 'PENDING'"
+        )
+
+    def _task_packet(self, identity: str | None) -> WorkTaskPacket | None:
+        if identity is None:
+            return None
+        rows = self._query(
+            "SELECT identity, work_identity, generation, transition, status, "
+            "canonical_design_identities, external_target_identities "
+            "FROM loop_task_packets "
+            f"WHERE identity = {_literal(identity)} LIMIT 1"
+        )
+        if not rows:
+            raise WorkStateUnavailable("TASK_PACKET_MISSING")
+        row = rows[0]
+        generation = row.get("generation")
+        if not isinstance(generation, int) or generation < 1:
+            raise WorkStateUnavailable("WORK_STATE_ROW_INVALID")
+        return WorkTaskPacket(
+            identity=_required_string(row, "identity"),
+            work_identity=_required_string(row, "work_identity"),
+            generation=generation,
+            transition=_required_string(row, "transition"),
+            status=_required_string(row, "status"),
+            canonical_design_identities=_string_tuple(row, "canonical_design_identities"),
+            external_target_identities=_string_tuple(row, "external_target_identities"),
+        )
+
+    def _pending_effects(self, work_identity: str) -> tuple[EffectAttempt, ...]:
+        rows = self._query(
+            "SELECT idempotency_key, work_identity, kind, target_identity, status, "
+            "request_identity "
+            "FROM loop_effect_attempts "
+            f"WHERE work_identity = {_literal(work_identity)} "
+            "AND status IN ('INTENT_RECORDED', 'UNCERTAIN') ORDER BY recorded_at ASC"
+        )
+        return tuple(
+            EffectAttempt(
+                idempotency_key=_required_string(row, "idempotency_key"),
+                work_identity=_required_string(row, "work_identity"),
+                kind=_required_string(row, "kind"),
+                target_identity=_required_string(row, "target_identity"),
+                status=_required_string(row, "status"),
+                request_identity=_optional_string(row, "request_identity"),
+            )
+            for row in rows
         )
 
     def _execute(self, sql: str) -> None:
@@ -233,3 +332,20 @@ def _string_tuple(row: dict[str, object], name: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise WorkStateUnavailable("WORK_STATE_ROW_INVALID")
     return tuple(value)
+
+
+def _work_record(row: dict[str, object]) -> WorkRecord:
+    issue_number = row.get("issue_number")
+    if not isinstance(issue_number, int) or issue_number < 1:
+        raise WorkStateUnavailable("WORK_STATE_ROW_INVALID")
+    return WorkRecord(
+        identity=_required_string(row, "identity"),
+        repository=_required_string(row, "repository"),
+        issue_number=issue_number,
+        issue_revision=_required_string(row, "issue_revision"),
+        lifecycle=_required_string(row, "lifecycle"),
+        selected_transition=_optional_string(row, "selected_transition"),
+        active_lineage_identity=_optional_string(row, "active_lineage_identity"),
+        latest_task_packet_identity=_optional_string(row, "latest_task_packet_identity"),
+        latest_checkpoint_identity=_optional_string(row, "latest_checkpoint_identity"),
+    )
