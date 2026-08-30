@@ -57,7 +57,10 @@ class PostgreSQLCommandAdapter:
         self._environment = environment
         self._driver = environment.get("LOOP_POSTGRES_DRIVER", "host").strip() or "host"
         self._container = environment.get("LOOP_POSTGRES_CONTAINER", "").strip()
-        self._dsn = environment.get("LOOP_POSTGRES_DSN", "").strip()
+        self._dsn = (
+            environment.get("LOOP_POSTGRES_DSN", "").strip()
+            or environment.get("LOOP_DATABASE_URL", "").strip()
+        )
         self._migration_dir = migration_dir or Path(__file__).with_name("migrations")
 
     def probe(self) -> PostgreSQLCapabilities:
