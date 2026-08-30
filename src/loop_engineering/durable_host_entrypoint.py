@@ -6,6 +6,7 @@ import os
 import uuid
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Protocol
 
 from . import host_entrypoint
 from .config import LoopEngineConfig
@@ -31,13 +32,29 @@ from .preflight import (
 )
 from .runtime_operational_state import (
     DurableHostTransitionCoordinator,
-    OperationalStatePort,
     OperationalStateUnavailable,
     PostgreSQLRuntimeOperationalStore,
 )
 
 _PROJECT_RATE_LIMIT_DIAGNOSTIC = "GITHUB_PROJECT_RATE_LIMITED"
 _PROJECT_BLOCKERS = {"GITHUB_PROJECT_READ", "GITHUB_PROJECT_WRITE"}
+
+
+class PreflightWaitStore(Protocol):
+    """Preflightで外部待ちになった事実だけを永続化する最小Port。"""
+
+    def begin_run(self, run_identity: str, project_key: str, repository: str) -> None: ...
+
+    def record_transition(
+        self,
+        run_identity: str,
+        sequence_number: int,
+        result: HostTransitionResult,
+    ) -> None: ...
+
+    def record_external_wait(self, run_identity: str, result: HostTransitionResult) -> None: ...
+
+    def finish_run(self, run_identity: str, status: str) -> None: ...
 
 
 def run_durable_actual_host_transition(
@@ -157,7 +174,7 @@ def _project_rate_limit_is_only_blocker(preflight: PreflightResult) -> bool:
 
 
 def _record_preflight_external_wait(
-    store: OperationalStatePort,
+    store: PreflightWaitStore,
     *,
     project_key: str,
     repository: str,
