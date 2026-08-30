@@ -150,7 +150,7 @@ class TrustedWorktree:
             return None
         if not self._git(("merge", "--ff-only", f"origin/{trunk}")).succeeded:
             return None
-        branch = f"loop/work-{work_issue}"
+        branch = self._config.work_branch(work_issue)
         local = self._git(("show-ref", "--verify", "--quiet", f"refs/heads/{branch}"))
         if local.returncode == 0:
             return None

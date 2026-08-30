@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from .config import LoopEngineConfig
+from .config import LoopEngineConfig, SelfImprovementConfig
 from .health import marker, render_issue_body
 from .models import (
     ConflictKind,
@@ -52,6 +52,9 @@ class GitHubImprovementIssuePublisher:
     runner: CommandRunner
 
     def publish(self, intent: ImprovementIssueIntent) -> ImprovementPublishResult:
+        sink = self.config.self_improvement
+        if not sink.enabled:
+            raise ValueError("自己改善公開先が無効です")
         self._validate_intent(intent)
         with _improvement_lock(intent.candidate.improvement_key):
             existing = self._find_open_issue(intent.candidate.improvement_key)
@@ -62,13 +65,13 @@ class GitHubImprovementIssuePublisher:
                         "issue",
                         "create",
                         "--repo",
-                        self.config.repository,
+                        sink.repository or "",
                         "--title",
                         intent.candidate.title,
                         "--body",
                         render_issue_body(intent.candidate, self.config),
                         "--label",
-                        self.config.label,
+                        sink.label or "",
                     )
                 )
                 issue_number = _issue_number(created_issue_url.strip())
@@ -88,8 +91,8 @@ class GitHubImprovementIssuePublisher:
                 "api",
                 "--paginate",
                 "--slurp",
-                f"repos/{self.config.repository}/issues?state=open&labels="
-                f"{self.config.label}&per_page=100",
+                f"repos/{self._sink().repository or ''}/issues?state=open&labels="
+                f"{self._sink().label or ''}&per_page=100",
             )
         )
         for item in _object_pages(raw):
@@ -116,9 +119,9 @@ class GitHubImprovementIssuePublisher:
                         "gh",
                         "project",
                         "item-add",
-                        str(self.config.project_number),
+                        str(self._sink().project_number or 0),
                         "--owner",
-                        self.config.owner,
+                        self._sink().owner or "",
                         "--url",
                         issue_url,
                         "--format",
@@ -131,7 +134,7 @@ class GitHubImprovementIssuePublisher:
                 WriteIntent(
                     "improvement-project-item-add-effect",
                     "project",
-                    str(self.config.project_number),
+                    str(self._sink().project_number or 0),
                     "verify_effect",
                     (),
                     (("item_id", item_id),),
@@ -159,7 +162,7 @@ class GitHubImprovementIssuePublisher:
             WriteIntent(
                 "improvement-project-effect",
                 "project",
-                str(self.config.project_number),
+                str(self._sink().project_number or 0),
                 "verify_effect",
                 (),
                 tuple(
@@ -205,7 +208,7 @@ class GitHubImprovementIssuePublisher:
             WriteIntent(
                 f"improvement-project-edit-{field_name}",
                 "project",
-                str(self.config.project_number),
+                str(self._sink().project_number or 0),
                 "edit_improvement_field",
                 tuple(expected_preconditions.items()),
                 (),
@@ -221,7 +224,7 @@ class GitHubImprovementIssuePublisher:
             WriteIntent(
                 f"improvement-project-edit-{field_name}-effect",
                 "project",
-                str(self.config.project_number),
+                str(self._sink().project_number),
                 "verify_effect",
                 (),
                 ((f"value:{field_name}", value),),
@@ -241,7 +244,7 @@ class GitHubImprovementIssuePublisher:
             WriteIntent(
                 "improvement-project-item-add",
                 "project",
-                str(self.config.project_number),
+                str(self._sink().project_number),
                 "add_improvement_item",
                 (("project_id", project_id), ("item_presence", "absent")),
                 (),
@@ -310,9 +313,9 @@ class GitHubImprovementIssuePublisher:
                     "gh",
                     "project",
                     "view",
-                    str(self.config.project_number),
+                    str(self._sink().project_number or 0),
                     "--owner",
-                    self.config.owner,
+                    self._sink().owner or "",
                     "--format",
                     "json",
                 )
@@ -330,9 +333,9 @@ class GitHubImprovementIssuePublisher:
                     "gh",
                     "project",
                     "item-list",
-                    str(self.config.project_number),
+                    str(self._sink().project_number or 0),
                     "--owner",
-                    self.config.owner,
+                    self._sink().owner or "",
                     "--limit",
                     "100000",
                     "--format",
@@ -382,9 +385,9 @@ class GitHubImprovementIssuePublisher:
                     "gh",
                     "project",
                     "field-list",
-                    str(self.config.project_number),
+                    str(self._sink().project_number or 0),
                     "--owner",
-                    self.config.owner,
+                    self._sink().owner or "",
                     "--format",
                     "json",
                 )
@@ -476,28 +479,38 @@ class GitHubImprovementIssuePublisher:
         }
 
     def _validate_intent(self, intent: ImprovementIssueIntent) -> None:
-        if intent.repository != self.config.repository:
+        sink = self._sink()
+        if intent.repository != sink.repository:
             raise ValueError("想定外のRepositoryです")
-        if intent.project_number != self.config.project_number:
+        if intent.project_number != sink.project_number:
             raise ValueError("想定外のProjectです")
-        if intent.label != self.config.label:
+        if intent.label != sink.label:
             raise ValueError("想定外の改善ラベルです")
 
+    def _sink(self) -> SelfImprovementConfig:
+        sink = self.config.self_improvement
+        if not sink.enabled:
+            raise ValueError("自己改善公開先が無効です")
+        return sink
+
     def _web_issue_url(self, number: int) -> str:
-        return f"https://github.com/{self.config.repository}/issues/{number}"
+        return f"https://github.com/{self._sink().repository or ''}/issues/{number}"
 
 
 def improvement_intent(
     candidate: ImprovementCandidate,
     config: LoopEngineConfig,
 ) -> ImprovementIssueIntent:
+    sink = config.self_improvement
+    if not sink.enabled:
+        raise ValueError("自己改善公開先が無効です")
     return ImprovementIssueIntent(
-        repository=config.repository,
-        project_number=config.project_number,
-        label=config.label,
+        repository=sink.repository or "",
+        project_number=sink.project_number or 0,
+        label=sink.label or "",
         status="Ready",
-        area=config.improvement_area,
-        issue_level=config.issue_level,
+        area=sink.area or "",
+        issue_level=sink.issue_level or "",
         candidate=candidate,
     )
 

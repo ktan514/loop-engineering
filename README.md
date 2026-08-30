@@ -25,7 +25,12 @@ cp .env.example .env
 [project]
 workspace_path = /absolute/path/to/product-workspace
 repository = owner/repository
+work_branch_template = feature/work-{issue}
 ```
+
+Product Workのbranch名は`work_branch_template`で指定します。`{issue}`だけを安全なplaceholderとして使え、任意shellや危険なGit refは受け付けません。
+
+自己改善Issueの公開先はProduct設定と独立した`[self_improvement]`へ明示します。別Productの設定でsectionを省略するか`enabled = false`にした場合、Product Repositoryへ自己改善Issueを作成しません。
 
 API key、token、database credential等の秘密値は設定ファイルへ直接書きません。設定ファイルには環境変数名だけを記載し、実値はGit管理外の`.env`へ定義します。
 
@@ -72,6 +77,15 @@ label = loop-engineering
 authority_refs = #26, #33
 ci_workflow_name = Loop Engineering Deterministic CI
 improvement_area = Runtime / Infrastructure
+issue_level = Work
+
+[self_improvement]
+enabled = true
+repository = ktan514/loop-engineering
+project_owner = ktan514
+project_number = 9
+label = loop-engineering
+area = Runtime / Infrastructure
 issue_level = Work
 ```
 

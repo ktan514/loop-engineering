@@ -2,7 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from loop_engineering.config import LoopEngineeringSettings
+from loop_engineering.config import (
+    LoopEngineConfig,
+    LoopEngineeringSettings,
+    SelfImprovementConfig,
+)
 
 
 def _write_config(path: Path, workspace: str, *, github_env: str = "MY_GITHUB_TOKEN") -> None:
@@ -131,3 +135,160 @@ def test_invalid_secret_environment_name_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="github_token_env"):
         LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+
+
+def test_product_branch_template_expands_only_issue_placeholder() -> None:
+    yura = LoopEngineConfig(
+        repository="ktan514/ai-liver-yura",
+        owner="ktan514",
+        project_number=7,
+        mission_issue=450,
+        work_branch_template="feature/work-{issue}",
+    )
+
+    assert yura.work_branch(123) == "feature/work-123"
+    assert LoopEngineConfig(
+        repository="ktan514/loop-engineering",
+        owner="ktan514",
+        project_number=9,
+        mission_issue=33,
+    ).work_branch(123) == "loop/work-123"
+
+
+@pytest.mark.parametrize(
+    "template",
+    (
+        "",
+        "feature/{name}",
+        "../work-{issue}",
+        "feature//{issue}",
+        "feature/foo.lock",
+        "feature/.hidden-{issue}",
+    ),
+)
+def test_invalid_product_branch_template_fails_closed(template: str) -> None:
+    with pytest.raises(ValueError, match="work_branch_template"):
+        LoopEngineConfig(
+            repository="owner/product",
+            owner="owner",
+            project_number=1,
+            mission_issue=1,
+            work_branch_template=template,
+        )
+
+
+def test_self_improvement_is_disabled_without_explicit_sink() -> None:
+    config = LoopEngineConfig(
+        repository="ktan514/ai-liver-yura",
+        owner="ktan514",
+        project_number=7,
+        mission_issue=450,
+    )
+
+    assert not config.self_improvement.enabled
+
+
+def test_explicit_self_improvement_sink_is_independent_from_product() -> None:
+    config = LoopEngineConfig(
+        repository="ktan514/ai-liver-yura",
+        owner="ktan514",
+        project_number=7,
+        mission_issue=450,
+        label="v2",
+        self_improvement=SelfImprovementConfig(
+            enabled=True,
+            repository="ktan514/loop-engineering",
+            owner="ktan514",
+            project_number=9,
+            label="loop-engineering",
+            area="Runtime / Infrastructure",
+            issue_level="Work",
+        ),
+    )
+
+    assert config.self_improvement.repository == "ktan514/loop-engineering"
+    assert config.self_improvement.project_number == 9
+    assert config.self_improvement.label == "loop-engineering"
+
+
+def test_settings_load_explicit_self_improvement_sink(tmp_path: Path) -> None:
+    config = tmp_path / "loop-engineering.ini"
+    _write_config(config, str(tmp_path / "product"))
+    with config.open("a", encoding="utf-8") as stream:
+        stream.write(
+            "\n[self_improvement]\n"
+            "enabled = true\n"
+            "repository = ktan514/loop-engineering\n"
+            "project_owner = ktan514\n"
+            "project_number = 9\n"
+            "label = loop-engineering\n"
+            "area = Runtime / Infrastructure\n"
+            "issue_level = Work\n"
+        )
+
+    settings = LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+
+    assert settings.engine.self_improvement.enabled
+    assert settings.engine.self_improvement.repository == "ktan514/loop-engineering"
+    assert settings.engine.self_improvement.project_number == 9
+
+
+@pytest.mark.parametrize("enabled", (True, False))
+def test_runtime_environment_round_trips_self_improvement_config(
+    tmp_path: Path, enabled: bool
+) -> None:
+    config = tmp_path / "loop-engineering.ini"
+    _write_config(config, str(tmp_path / "product"))
+    if enabled:
+        with config.open("a", encoding="utf-8") as stream:
+            stream.write(
+                "\n[self_improvement]\n"
+                "enabled = true\nrepository = ktan514/loop-engineering\n"
+                "project_owner = ktan514\nproject_number = 9\n"
+                "label = loop-engineering\narea = Runtime / Infrastructure\n"
+                "issue_level = Work\nauthority_refs = #26, #40\n"
+            )
+    else:
+        with config.open("a", encoding="utf-8") as stream:
+            stream.write("\n[self_improvement]\nenabled = false\n")
+
+    settings = LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+    round_tripped = LoopEngineConfig.from_environment(settings.runtime_environment({}))
+
+    assert round_tripped.self_improvement.enabled is enabled
+    if enabled:
+        assert round_tripped.self_improvement.repository == "ktan514/loop-engineering"
+        assert round_tripped.self_improvement.owner == "ktan514"
+        assert round_tripped.self_improvement.project_number == 9
+        assert round_tripped.self_improvement.label == "loop-engineering"
+        assert round_tripped.self_improvement.area == "Runtime / Infrastructure"
+        assert round_tripped.self_improvement.issue_level == "Work"
+
+
+def test_legacy_self_target_configuration_is_migrated_only_at_platform_root(tmp_path: Path) -> None:
+    config = tmp_path / "loop-engineering.ini"
+    _write_config(config, str(tmp_path))
+
+    settings = LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+
+    assert settings.engine.self_improvement.enabled
+    assert settings.engine.self_improvement.repository == "owner/product"
+
+
+def test_distributed_example_configuration_loads_after_workspace_replacement(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    template = root / "config" / "loop-engineering.example.ini"
+    config = tmp_path / "loop-engineering.ini"
+    config.write_text(
+        template.read_text(encoding="utf-8").replace(
+            "/absolute/path/to/product-workspace", str(tmp_path / "workspace")
+        ),
+        encoding="utf-8",
+    )
+
+    settings = LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+
+    assert settings.engine.repository == "owner/repository"
+    assert settings.engine.self_improvement.authority_refs == ()
