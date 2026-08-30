@@ -16,12 +16,12 @@ def test_docker_required_settings_are_injected_without_dsn_value(tmp_path: Path)
     config = tmp_path / "loop-engineering.ini"
     _write_config(
         config,
-        """[operational_store]\n"
+        "[operational_store]\n"
         "dsn_env = LOOP_POSTGRES_DSN\n"
         "required = true\n"
         "driver = docker\n"
         "docker_container = local-postgres\n"
-        "migration_policy = required\n""",
+        "migration_policy = required\n",
     )
 
     settings = load_operational_store_settings(config)
