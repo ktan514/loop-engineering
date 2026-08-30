@@ -186,7 +186,7 @@ def test_preflight_external_wait_is_persisted_as_terminal_yield() -> None:
     )
 
     assert _record_preflight_external_wait(
-        store,  # type: ignore[arg-type]
+        store,
         project_key="ai-liver-yura",
         repository="ktan514/ai-liver-yura",
         result=result,
@@ -203,7 +203,7 @@ def test_required_store_failure_blocks_preflight_wait_recording() -> None:
     )
 
     assert not _record_preflight_external_wait(
-        WaitStore(fail=True),  # type: ignore[arg-type]
+        WaitStore(fail=True),
         project_key="ai-liver-yura",
         repository="ktan514/ai-liver-yura",
         result=result,
