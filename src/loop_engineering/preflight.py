@@ -28,8 +28,8 @@ class PreflightStatus(str, Enum):
 class CommandResult:
     succeeded: bool
     output: str = ""
-    error: str = ""
     timed_out: bool = False
+    error: str = ""
 
 
 class CommandRunner(Protocol):
@@ -68,7 +68,7 @@ class SubprocessCommandRunner:
         return CommandResult(
             result.returncode == 0,
             result.stdout,
-            result.stderr,
+            error=result.stderr,
         )
 
 
