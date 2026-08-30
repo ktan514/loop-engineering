@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 from urllib.parse import urlsplit
 
 
@@ -99,9 +100,7 @@ class PostgreSQLCommandAdapter:
             "applied_at TIMESTAMPTZ NOT NULL DEFAULT now()"
             ");"
         )
-        if not self._run_client(
-            ("psql", "-v", "ON_ERROR_STOP=1", "-q", "-c", registry_sql), parsed
-        ).succeeded:
+        if not self.execute_sql(registry_sql):
             return MigrationApplyResult(False, (), "MIGRATION_REGISTRY_UNAVAILABLE")
 
         applied = self._applied_migrations(parsed)
@@ -124,13 +123,44 @@ class PostgreSQLCommandAdapter:
                 f"VALUES ('{filename}') ON CONFLICT (filename) DO NOTHING;\n"
                 "COMMIT;"
             )
-            result = self._run_client(
-                ("psql", "-v", "ON_ERROR_STOP=1", "-q", "-c", transaction), parsed
-            )
-            if not result.succeeded:
+            if not self.execute_sql(transaction):
                 return MigrationApplyResult(False, tuple(completed), "MIGRATION_APPLY_FAILED")
             completed.append(path.name)
         return MigrationApplyResult(True, tuple(completed), "MIGRATION_CURRENT")
+
+    def execute_sql(self, sql: str) -> bool:
+        """秘密を含まない内部SQLを1回実行する。"""
+        parsed = self._parsed_dsn()
+        if parsed is None or self._driver not in self._DRIVERS:
+            return False
+        if self._driver == "docker" and not self._container:
+            return False
+        return self._run_client(
+            ("psql", "-v", "ON_ERROR_STOP=1", "-q", "-c", sql),
+            parsed,
+        ).succeeded
+
+    def query_json_rows(self, select_sql: str) -> list[dict[str, object]] | None:
+        """秘密を含まない内部SELECTをJSON配列として読み戻す。"""
+        parsed = self._parsed_dsn()
+        if parsed is None or self._driver not in self._DRIVERS:
+            return None
+        if self._driver == "docker" and not self._container:
+            return None
+        statement = (
+            "SELECT COALESCE(json_agg(row_to_json(loop_query)), '[]'::json)::text "
+            f"FROM ({select_sql}) AS loop_query"
+        )
+        result = self._run_client(("psql", "-Atqc", statement), parsed)
+        if not result.succeeded:
+            return None
+        try:
+            payload = json.loads(result.output.strip() or "[]")
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
+            return None
+        return [cast(dict[str, object], item) for item in payload]
 
     def _migrations_current(self, parsed: _ParsedDSN) -> bool:
         expected = {path.name for path in self._migration_files()}

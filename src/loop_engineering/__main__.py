@@ -35,6 +35,11 @@ def main() -> int:
         help="設定されたPostgreSQLへ未適用のversioned SQL migrationを明示適用する。",
     )
     parser.add_argument(
+        "--operational-state-check",
+        action="store_true",
+        help="ProductやGitHubを変更せず、Operational Storeのwrite/readbackだけを確認する。",
+    )
+    parser.add_argument(
         "--config",
         help="既定のconfig/loop-engineering.ini以外を使用する場合の設定ファイルpath。",
     )
@@ -96,6 +101,23 @@ def main() -> int:
         )
         return 0 if migration_result.succeeded else 3
 
+    if arguments.operational_state_check:
+        from .operational_state_check import check_operational_state_round_trip
+        from .postgres_runtime import PostgreSQLCommandAdapter
+        from .preflight import SubprocessCommandRunner
+
+        check_result = check_operational_state_round_trip(
+            PostgreSQLCommandAdapter(SubprocessCommandRunner(), environment),
+            project_key=settings.project_key,
+            repository=settings.engine.repository,
+        )
+        print(
+            "OPERATIONAL_STATE_CHECK="
+            f"{'PASS' if check_result.succeeded else 'FAIL'} "
+            f"detail={check_result.detail}"
+        )
+        return 0 if check_result.succeeded else 3
+
     if arguments.preflight:
         from .preflight import (
             EnvironmentCapabilityPreflight,
@@ -113,7 +135,7 @@ def main() -> int:
         print(preflight_result.as_json())
         return 3 if preflight_result.status is PreflightStatus.BLOCKED else 0
 
-    from .host_entrypoint import run_actual_host_transition
+    from .durable_host_entrypoint import run_durable_actual_host_transition
 
     console = RuntimeConsole(platform_root, verbose=arguments.verbose)
     runner = VisibleSubprocessLocalRunner(console)
@@ -134,11 +156,12 @@ def main() -> int:
         while True:
             transition_number += 1
             console.event(f"遷移 {transition_number}: 開始")
-            transition_result = run_actual_host_transition(
+            transition_result = run_durable_actual_host_transition(
                 root=workspace_root,
                 environment=environment,
                 local_runner=runner,
                 config=settings.engine,
+                project_key=settings.project_key,
             )
             console.event(
                 f"遷移 {transition_number}: "

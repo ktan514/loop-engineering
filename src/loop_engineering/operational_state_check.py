@@ -1,0 +1,83 @@
+"""ProductやGitHubを変更せずOperational Storeのwrite/readbackを確認する。"""
+
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass
+from typing import Protocol
+
+
+class OperationalStateCheckDatabase(Protocol):
+    def execute_sql(self, sql: str) -> bool: ...
+
+    def query_json_rows(self, select_sql: str) -> list[dict[str, object]] | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class OperationalStateCheckResult:
+    succeeded: bool
+    detail: str
+
+
+def check_operational_state_round_trip(
+    database: OperationalStateCheckDatabase,
+    *,
+    project_key: str,
+    repository: str,
+) -> OperationalStateCheckResult:
+    """本番runと別namespaceへsynthetic runを記録し、同一値をreadbackする。"""
+    identity = f"health:{uuid.uuid4().hex}"
+    health_project_key = f"health:{project_key}"
+    insert = (
+        "INSERT INTO loop_runs (identity, project_key, repository, status) VALUES ("
+        f"{_literal(identity)}, {_literal(health_project_key)}, "
+        f"{_literal(repository)}, 'RUNNING')"
+    )
+    if not database.execute_sql(insert):
+        return OperationalStateCheckResult(False, "WRITE_FAILED")
+
+    running = database.query_json_rows(
+        "SELECT identity, project_key, repository, status FROM loop_runs "
+        f"WHERE identity = {_literal(identity)} LIMIT 1"
+    )
+    if not _matches(running, identity, health_project_key, repository, "RUNNING"):
+        return OperationalStateCheckResult(False, "RUNNING_READBACK_FAILED")
+
+    completed = database.execute_sql(
+        "UPDATE loop_runs SET status = 'COMPLETED', finished_at = now() "
+        f"WHERE identity = {_literal(identity)}"
+    )
+    if not completed:
+        return OperationalStateCheckResult(False, "FINALIZE_FAILED")
+
+    terminal = database.query_json_rows(
+        "SELECT identity, project_key, repository, status FROM loop_runs "
+        f"WHERE identity = {_literal(identity)} LIMIT 1"
+    )
+    if not _matches(terminal, identity, health_project_key, repository, "COMPLETED"):
+        return OperationalStateCheckResult(False, "TERMINAL_READBACK_FAILED")
+    return OperationalStateCheckResult(True, "ROUND_TRIP_PASS")
+
+
+def _matches(
+    rows: list[dict[str, object]] | None,
+    identity: str,
+    project_key: str,
+    repository: str,
+    status: str,
+) -> bool:
+    if rows is None or len(rows) != 1:
+        return False
+    row = rows[0]
+    return (
+        row.get("identity") == identity
+        and row.get("project_key") == project_key
+        and row.get("repository") == repository
+        and row.get("status") == status
+    )
+
+
+def _literal(value: str) -> str:
+    if "\x00" in value or len(value) > 1024:
+        raise ValueError("Operational State確認値が不正です")
+    return "'" + value.replace("'", "''") + "'"
