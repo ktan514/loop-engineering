@@ -67,6 +67,8 @@ INTENT_RECORDED
 
 DBにWorkRecordまたは安全Checkpointが無い場合、過去Issue commentへ戻らない。`BLOCKED(WORK_RECOVERY_MISSING)`として、Issueから新規Workを明示選択する処理だけを許可する。
 
+`READY`を返すには、`WorkRecord.latest_task_packet_identity`が指す作業パケットと`WorkRecord.latest_checkpoint_identity`が指す安全Checkpointの両方が存在し、同じWorkを参照し、Checkpointの`task_packet_identity`がその作業パケットを指していなければならない。時刻上もっとも新しい別Checkpointをpointerの代わりに採用してはならない。pointer欠落、参照先欠落、Work不一致、作業パケット不一致のいずれかがある場合は`BLOCKED(WORK_RECOVERY_MISSING)`とし、新しい外部変更を開始しない。
+
 Checkpointが旧schemaの場合、対応migrationを適用した明示移行処理へ渡す。任意の列欠落を空値で補うことは禁止する。
 
 ### 4.2 定義同期
