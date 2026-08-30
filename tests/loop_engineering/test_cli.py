@@ -90,9 +90,9 @@ def test_once_cli_runs_one_actual_host_transition(
     assert '"status": "YIELD_EXTERNAL"' in output
     assert '"detail": "CI_PENDING"' in output
     assert received["verbose"] is False
-    assert events[0] == "開始 mode=once（1回実行） project=test-project"
-    assert "遷移 1: 開始" in events
-    assert events[-1] == "遷移 1: YIELD_EXTERNAL 詳細=CI_PENDING"
+    assert events[0] == "Start: mode=once（1回実行） project=test-project"
+    assert "Transition 1: Start" in events
+    assert events[-1] == "Transition 1: YIELD_EXTERNAL detail=CI_PENDING"
     assert received["root"] == Path("/product")
     assert received["config"] == config()
     assert "local_runner" in received
@@ -166,10 +166,63 @@ def test_default_cli_continues_completed_and_ci_pending_without_operator(
     assert output.count("\n") == 1
     assert '"detail": "HUMAN_VERIFICATION_PENDING"' in output
     assert sleeps == [60.0]
-    assert events[0] == "開始 mode=continuous（継続実行） project=test-project"
-    assert events.count("継続: 現在状態を再観測します") == 2
-    assert "CI待機: 60秒後に自動再開します" in events
-    assert "遷移 4: YIELD_EXTERNAL 詳細=HUMAN_VERIFICATION_PENDING" in events
+    assert events[0] == "Start: mode=continuous（継続実行） project=test-project"
+    assert events.count("Continue: 現在状態をfresh observeします") == 2
+    assert "CI Wait: 60秒後に自動再開します" in events
+    assert "Transition 4: YIELD_EXTERNAL detail=HUMAN_VERIFICATION_PENDING" in events
+
+
+def test_continuous_cli_retries_project_rate_limit_with_bounded_wait(
+    monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
+) -> None:
+    events: list[str] = []
+    sleeps: list[float] = []
+    results = iter(
+        (
+            HostTransitionResult(
+                HostTransitionStatus.YIELD_EXTERNAL,
+                "GITHUB_PROJECT_RATE_LIMIT",
+            ),
+            HostTransitionResult(
+                HostTransitionStatus.YIELD_EXTERNAL,
+                "GITHUB_PROJECT_RATE_LIMIT",
+            ),
+            HostTransitionResult(
+                HostTransitionStatus.YIELD_EXTERNAL,
+                "HUMAN_VERIFICATION_PENDING",
+            ),
+        )
+    )
+
+    class FakeConsole:
+        def __init__(self, root: Path, *, verbose: bool = False) -> None:
+            del verbose
+            self.path = root / "test.log"
+
+        def event(self, message: str) -> None:
+            events.append(message)
+
+    class FakeRunner:
+        def __init__(self, console: object) -> None:
+            del console
+
+    def fake_transition(**kwargs: object) -> HostTransitionResult:
+        del kwargs
+        return next(results)
+
+    install_fake_settings(monkeypatch)
+    monkeypatch.setattr(cli, "RuntimeConsole", FakeConsole)
+    monkeypatch.setattr(cli, "VisibleSubprocessLocalRunner", FakeRunner)
+    monkeypatch.setattr(time, "sleep", lambda seconds: sleeps.append(seconds))
+    monkeypatch.setattr(
+        "loop_engineering.host_entrypoint.run_actual_host_transition", fake_transition
+    )
+    monkeypatch.setattr(sys, "argv", ["loop_engineering"])
+
+    assert cli.main() == 2
+    assert sleeps == [300.0, 600.0]
+    assert sum(event.startswith("External Wait:") for event in events) == 2
+    assert '"detail": "HUMAN_VERIFICATION_PENDING"' in capsys.readouterr().out
 
 
 def test_continuous_cli_stops_repeated_completed_no_progress(
