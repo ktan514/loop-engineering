@@ -208,10 +208,11 @@ def main() -> int:
 
             if (
                 transition_result.status is HostTransitionStatus.YIELD_EXTERNAL
-                and transition_result.detail == "CI_PENDING"
+                and transition_result.detail in {"CI_PENDING", "REVIEW_PENDING"}
             ):
+                wait_kind = "CI" if transition_result.detail == "CI_PENDING" else "Review"
                 console.event(
-                    f"CI Wait: {int(ci_wait_seconds)}秒後に自動再開します"
+                    f"{wait_kind} Wait: {int(ci_wait_seconds)}秒後に自動再開します"
                 )
                 time.sleep(ci_wait_seconds)
                 ci_wait_seconds = min(

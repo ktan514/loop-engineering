@@ -9,13 +9,12 @@ from pathlib import Path
 from typing import Protocol
 
 from . import host_entrypoint
-from .config import LoopEngineConfig
-from .host_entrypoint import (
-    PilotAwareMissionPort,
-    PilotPlanningImplementer,
-    ReconciliationAwareHostLoopController,
-    StrictGhMissionPort,
+from .actual_host_merge_safety import (
+    ReviewAwareHostLoopController,
+    SafeActualHostMissionPort,
 )
+from .config import LoopEngineConfig
+from .host_entrypoint import PilotAwareMissionPort, PilotPlanningImplementer
 from .host_runtime import (
     HostTransitionResult,
     HostTransitionStatus,
@@ -140,7 +139,7 @@ def run_durable_actual_host_transition(
             "CODEX_COMMAND_INVALID",
         )
 
-    strict = StrictGhMissionPort(resolved_config, runner, values)
+    strict = SafeActualHostMissionPort(resolved_config, runner, values)
     mission = PilotAwareMissionPort(resolved_config, strict)
     implementer = PilotPlanningImplementer(
         resolved_config,
@@ -149,10 +148,11 @@ def run_durable_actual_host_transition(
         values,
         argv_prefix,
     )
-    controller = ReconciliationAwareHostLoopController(
+    controller = ReviewAwareHostLoopController(
         resolved_config,
         mission,
         implementer,
+        strict,
     )
     return DurableHostTransitionCoordinator(
         project_key=resolved_project_key,

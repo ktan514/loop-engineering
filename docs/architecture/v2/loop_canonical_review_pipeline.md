@@ -24,6 +24,18 @@
 
 非機能的な強化、追加監査性、より厳格な管理情報検証、仮説的な競合防御など、必須挙動を妨げない指摘は記録して後回しにしてよい。提供元失敗を含む`NOT_RUN`は、機械検査と必須機能証拠が通っているWorkを停止しない。よりきれいなレビュー判定を得ることだけを目的にレビューワー基盤を強化しない。
 
+## DraftとReadyの境界
+
+Draft PRは「まだ統合可能状態へ昇格していない」というGitHub上の明示状態として扱う。
+
+- actual-hostはDraft PRを同一遷移内で自動Ready化してそのままmergeしない。
+- exact-head CIがSUCCESSでもDraftなら`REVIEW_PENDING`として外部待ちへ譲る。
+- Ready化はレビュー・修正・運用判断によって別の状態遷移として発生したことをfresh readしてから扱う。
+- Draft待機はMission全体のHuman Interventionではなく、別のdependency-ready WorkがあればMissionは継続できる。
+- Ready化後も期待HEAD、CI、既知の機能停止要因、Write Gateをfresh確認する。
+
+この境界により、review `PASS`を必須化せず、同時に「CI成功だけでDraftをReady化・mergeする」競合した副作用を禁止する。
+
 ## 統合判定
 
 Ready化または統合の前に、実行機はPR/HEAD/基点、必須の厳密HEAD機械検査、機能完了証拠、書込み判定（Write Gate）の事前条件を再解決する。統合は期待HEADへ結び付けた通常GitHub経路で実施し、その後に基幹と統合効果を再取得する。
