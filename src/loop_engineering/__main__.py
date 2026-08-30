@@ -139,6 +139,7 @@ def main() -> int:
                 environment=environment,
                 local_runner=runner,
                 config=settings.engine,
+                project_key=settings.project_key,
             )
             console.event(
                 f"遷移 {transition_number}: "
