@@ -63,8 +63,8 @@ class V2ResumeCoordinator:
 
     def resume(self, work_identity: str) -> V2ResumeResult:
         recovered = self._recovery.recover(work_identity)
-        if recovered is None:
-            return V2ResumeResult(V2ResumeStatus.BLOCKED, "WORK_RECOVERY_MISSING")
+        if recovered is None or not _complete_recovery(recovered):
+            return V2ResumeResult(V2ResumeStatus.BLOCKED, "WORK_RECOVERY_MISSING", recovered)
 
         synchronized = self._definitions.synchronize(recovered.record)
         if synchronized is None:
@@ -96,6 +96,21 @@ class V2ResumeCoordinator:
             )
 
         return V2ResumeResult(V2ResumeStatus.READY, "RESUME_READY", recovered)
+
+
+def _complete_recovery(recovered: RecoveredWork) -> bool:
+    packet = recovered.task_packet
+    checkpoint = recovered.checkpoint
+    if packet is None or checkpoint is None:
+        return False
+    record = recovered.record
+    return (
+        record.latest_task_packet_identity == packet.identity
+        and record.latest_checkpoint_identity == checkpoint.identity
+        and packet.work_identity == record.identity
+        and checkpoint.work_identity == record.identity
+        and checkpoint.task_packet_identity == packet.identity
+    )
 
 
 def _same_work(before: WorkRecord, after: WorkRecord) -> bool:
