@@ -8,6 +8,7 @@ from pathlib import Path
 from .config import LoopEngineeringSettings
 from .host_runtime import HostTransitionResult, HostTransitionStatus
 from .mission_goal import inject_mission_goal_environment
+from .operational_config import inject_operational_store_environment
 from .runtime_console import RuntimeConsole, VisibleSubprocessLocalRunner
 
 _CI_RECHECK_INITIAL_SECONDS = 60.0
@@ -22,6 +23,16 @@ def main() -> int:
         "--validate-installation",
         action="store_true",
         help="外部システムを観測・変更せずに制御系パッケージの導入状態を確認する。",
+    )
+    parser.add_argument(
+        "--preflight",
+        action="store_true",
+        help="CodexやGit mutationを開始せず、現在のHost能力だけを事前確認する。",
+    )
+    parser.add_argument(
+        "--migrate-operational-store",
+        action="store_true",
+        help="設定されたPostgreSQLへ未適用のversioned SQL migrationを明示適用する。",
     )
     parser.add_argument(
         "--config",
@@ -45,8 +56,6 @@ def main() -> int:
         print("LOOP_ENGINE_INSTALLATION=PASS")
         return 0
 
-    from .host_entrypoint import run_actual_host_transition
-
     platform_root = Path(__file__).resolve().parents[2]
     selected_config = Path(arguments.config) if arguments.config else None
     try:
@@ -54,6 +63,10 @@ def main() -> int:
             platform_root,
             os.environ,
             config_path=selected_config,
+        )
+        environment = inject_operational_store_environment(
+            settings.config_path,
+            settings.runtime_environment(os.environ),
         )
     except ValueError as error:
         print(f"CONFIGURATION_INVALID: {error}")
@@ -64,8 +77,43 @@ def main() -> int:
         platform_root=platform_root,
         product_root=workspace_root,
         repository=settings.engine.repository,
-        environment=settings.runtime_environment(os.environ),
+        environment=environment,
     )
+
+    if arguments.migrate_operational_store:
+        from .postgres_runtime import PostgreSQLCommandAdapter
+        from .preflight import SubprocessCommandRunner
+
+        result = PostgreSQLCommandAdapter(
+            SubprocessCommandRunner(),
+            environment,
+        ).apply_migrations()
+        applied = ",".join(result.applied) if result.applied else "なし"
+        print(
+            f"OPERATIONAL_STORE_MIGRATION={'PASS' if result.succeeded else 'FAIL'} "
+            f"detail={result.detail} applied={applied}"
+        )
+        return 0 if result.succeeded else 3
+
+    if arguments.preflight:
+        from .preflight import (
+            EnvironmentCapabilityPreflight,
+            PreflightStatus,
+            SubprocessCommandRunner,
+        )
+
+        result = EnvironmentCapabilityPreflight(
+            settings.engine,
+            SubprocessCommandRunner(),
+            environment,
+            project_root=workspace_root,
+        ).run()
+        print(f"MISSION_GOAL_PATH = {environment.get('LOOP_MISSION_GOAL_PATH', '')}")
+        print(result.as_json())
+        return 3 if result.status is PreflightStatus.BLOCKED else 0
+
+    from .host_entrypoint import run_actual_host_transition
+
     console = RuntimeConsole(platform_root, verbose=arguments.verbose)
     runner = VisibleSubprocessLocalRunner(console)
     mode = "once" if arguments.once else "continuous"
