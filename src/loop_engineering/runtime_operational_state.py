@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import uuid
 from dataclasses import dataclass
 from typing import Protocol
@@ -10,7 +9,6 @@ from typing import Protocol
 from .host_runtime import HostTarget, HostTransitionResult, HostTransitionStatus
 from .postgres_runtime import PostgreSQLCommandAdapter
 
-_SAFE_CODE_RE = re.compile(r"^[A-Za-z0-9_.:/#-]{1,256}$")
 _TERMINAL_RUN_STATUS = frozenset(
     {
         HostTransitionStatus.COMPLETED.value,
