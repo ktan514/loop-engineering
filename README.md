@@ -89,7 +89,7 @@ area = Runtime / Infrastructure
 issue_level = Work
 ```
 
-Project / Mission / Parent / Integration Workを同じIssue番号へ便宜的に潰しません。GitHub liveとMission #33を現在状態の正本として扱います。
+Project / Mission / Parent / Integration Workを同じIssue番号へ便宜的に潰しません。IssueとProjectは課題・作業の統括を、PostgreSQLは停止後に復元する実行作業状態を所有します。詳細は`docs/architecture/v2/work_state_and_issue_boundary.md`を参照してください。
 
 ## 起動
 

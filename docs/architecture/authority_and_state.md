@@ -9,7 +9,19 @@ Loop Engineeringが扱う「現在状態」「設計Authority」「実行記憶�
 
 ## 2. Authority classes
 
-### 2.1 Current-state Authority
+### 2.1 課題・作業の統括
+
+「何を解決するか」「いつ完了とみなすか」を決めるIssueと計画システムの現在値。
+
+例:
+
+- Issueの目的、受入条件、依存関係、open/closed
+- Projectの優先度、計画上の状態
+- Issue commentによる人間向け進捗・判断記録
+
+Issue commentは実行再開の機械入力ではない。
+
+### 2.2 外部現在状態
 
 「今どうなっているか」を決める外部/live source。
 
@@ -23,15 +35,15 @@ Loop Engineeringが扱う「現在状態」「設計Authority」「実行記憶�
 
 Coreは特定providerを前提にせず、Adapterからnormalized snapshotを受け取る。
 
-### 2.2 Design Authority
+### 2.3 設計正本
 
 「どうあるべきか」を決めるtrusted canonical design / ADR / policy。
 
 必ずexact revision identityを持つ。
 
-### 2.3 Operational State
+### 2.4 実行作業状態
 
-再起動・重複抑止・監査のためのruntime memory。
+再起動・重複抑止・監査のためのDB上の実行記憶。選択済み作業、作業パケット、再開Checkpoint、未確定の外部効果を含む。
 
 例:
 
@@ -42,9 +54,9 @@ Coreは特定providerを前提にせず、Adapterからnormalized snapshotを受
 - event log
 - local checkpoint
 
-Operational Stateをexternal current-state Authorityへ昇格しない。
+Issueの目的・受入条件・完了判断をDBへ移さない。一方で、再開対象をIssue Checkpointから復元しない。
 
-### 2.4 Conversational Context
+### 2.5 会話文脈
 
 chat transcript / summary / memory等。
 
@@ -54,17 +66,16 @@ chat transcript / summary / memory等。
 
 Generic default:
 
-### Current facts
+### 課題・実行状態
 
-1. fresh live provider state
-2. provider-bound latest durable checkpoint
-3. normalized planning state
-4. trusted local operational evidence
-5. conversational context
+1. Issue / Projectの現在定義
+2. DBの選択済み作業と安全Checkpoint
+3. 対象外部効果の現在値
+4. 会話文脈
 
 ただし「順番で上書きする」だけではなく、不一致はtyped conflictとして残す。
 
-### Design intent
+### 設計意図
 
 1. target Workが参照するtrusted canonical design revision
 2. parent/root architecture / mandatory platform policy
@@ -264,7 +275,7 @@ PRが長期化してtrusted canonical branchが進んだ場合、Review/Resume�
 
 ## 12. Checkpoint model
 
-Checkpointは再開補助でありcurrent truthではない。
+CheckpointはDB内の再開正本である。ただし、外部効果の成否はCheckpointだけで確定せず、必要な対象を再照合する。
 
 ```text
 Checkpoint
@@ -284,13 +295,14 @@ Checkpoint
 restart時:
 
 ```text
-Checkpoint
-+ fresh live state
-→ reconcile
-→ Resume Gate
+DB Checkpoint
++ Issue / Project定義同期
++ 対象外部効果の再照合
+→ 再調整
+→ 再開判定
 ```
 
-Checkpointだけから作業を再開しない。
+Issue commentだけから作業を再開しない。DB Checkpointが指す未確定effectは再送せず、先に対象を照合する。
 
 ## 13. State ownership matrix
 
@@ -301,7 +313,7 @@ Checkpointだけから作業を再開しない。
 | canonical design | trusted source ref | yes | yes when generation-sensitive |
 | CI result | CI provider | yes | yes before merge |
 | review verdict | Reviewer provider/broker | yes | yes before merge |
-| runtime blocker | RuntimeStore + resolution evidence | n/a | yes |
+| 実行上のblocker | RuntimeStore + 解消証拠 | n/a | yes |
 | execution lease | ExecutionLeasePort | n/a | yes |
 | chat memory | none/current state non-authoritative | yes | never sufficient |
 

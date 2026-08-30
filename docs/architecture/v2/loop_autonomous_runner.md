@@ -54,7 +54,7 @@ Repository、Project、Mission、Parent、Integration Work、trunk、CI workflow
 - Integration Work: #27
 - Root: 未設定
 
-現在対象は毎回GitHub liveから再取得する。Checkpointや会話記憶だけからPR / branch / HEADを推測しない。
+現在対象はDBの作業記録と安全Checkpointから復元する。PR / branch / HEADなど外部効果に関わる対象は、DBが記録したidentityを用いて必要な遷移の直前にGitHubから再取得する。Issue commentや会話記憶だけから対象を推測しない。
 
 ## 接続口と実行境界
 
@@ -62,7 +62,7 @@ Repository、Project、Mission、Parent、Integration Work、trunk、CI workflow
 
 standalone実装正本は`src/loop_engineering/**`であり、製品実行系を別packageへ複製しない。現在の配置契約は`standalone_package_layout.md`を正本とする。
 
-最新Mission Checkpointを探索候補として使用するが、古い解析可能なCheckpointへ遡って現在対象を補完しない。現在対象の識別情報が必要な遷移で欠落または不正なら安全側停止にする。
+Issueの状況報告は候補探索にも再開入力にも使用しない。DBの安全Checkpointに現在対象の識別情報が欠落または不正な場合は安全側停止にする。
 
 ただし、Work統合後から次Work選択前までの正常な中間状態と、破損したCheckpointは区別する必要がある。#27はこの実運転境界を検証する。
 

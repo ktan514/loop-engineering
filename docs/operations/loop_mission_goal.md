@@ -5,7 +5,7 @@ generation: 1
 
 ## Mission
 
-Mission #33とParent #9を通じて、`ktan514/loop-engineering`をstandalone Loop Engineering Platformとして完成させる。GitHub上の現在Issue、PR、branch、厳密HEAD、CI、Project #9状態を現在状態の正本とする。このGoalへ固定PR番号や固定HEADを書き込まず、最新Mission/Work CheckpointとGitHub liveの再取得から現在対象を解決する。
+Mission #33とParent #9を通じて、`ktan514/loop-engineering`をstandalone Loop Engineering Platformとして完成させる。IssueとProject #9は課題・作業の統括を所有し、PostgreSQLは再開する実行作業状態を所有する。PR、branch、厳密HEAD、CIは対象外部効果の正本であり、DB復元後に必要な対象だけを再取得する。このGoalへ固定PR番号や固定HEADを書き込まない。
 
 ## 正本と安全境界
 
@@ -60,7 +60,7 @@ OpenAI API keyの標準環境変数名は`OPENAI_API_KEY`とする。`OPENAI_API
 
 ## 再開判定と作業パケット
 
-branch作成、実装、push、merge、新規PR作成の前に、GitHub現在状態、最新Mission/Work Checkpoint、正本設計、現在の作業系列を読み、Issue、設計、branch、基点/HEAD SHA、検証、次作業、競合を含む再開証明（Resume Certificate）を生成する。会話記憶から現在状態を推測しない。競合、未知の作業系列、説明できないSHA変更がある場合は、実装前に再調整する。
+branch作成、実装、push、merge、新規PR作成の前に、DBの作業記録と最後の安全Checkpointを復元し、Issue / Projectの作業定義、正本設計、対象のbranch・基点・HEAD SHA・検証状態を必要な範囲で照合する。Issue、設計、branch、基点/HEAD SHA、検証、次作業、競合を含む再開証明（Resume Certificate）を生成する。会話記憶またはIssue commentから現在状態を推測しない。競合、未知の作業系列、説明できないSHA変更がある場合は、実装前に再調整する。
 
 選択した作業パケット（Task Packet）は、正本、対象範囲・非対象、厳密対象、依存関係、受け入れ確認、危険境界、唯一の能動作業系列を明示する。
 
@@ -82,7 +82,7 @@ branch作成、実装、push、merge、新規PR作成の前に、GitHub現在状
 
 有用な独立作業が存在する間、Missionは`ACTIVE`である。外部結果だけが未確定の場合、`YIELD_EXTERNAL`は安全な実行結果であり、人間介入ではない。`PAUSED_FOR_INTERVENTION`は、安全に推測できない実際の利用者判断または正本判断が必要な場合だけ使用する。
 
-重要な遷移ごとにMission/Work、branch/PR、厳密HEAD、完了作業、検証、停止要因、最初の再開作業をGitHubへ記録する。個別Work完了だけでMission #33を完了にしない。
+重要な遷移ごとに、DBへMission/Work、branch/PR、厳密HEAD、完了作業、検証、停止要因、最初の再開作業を確定する。Issueにはその確定済み状態から人間向け状況報告を投稿する。個別Work完了だけでMission #33を完了にしない。
 
 Mission #33を完了できるのは、少なくとも次が現在証拠で満了した場合だけである。
 

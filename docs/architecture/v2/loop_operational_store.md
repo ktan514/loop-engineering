@@ -1,24 +1,25 @@
 # Loop運用記憶 / PostgreSQL管理基盤
 
-管理Issue: #44
+管理Issue: #62
+旧管理Issue: #44
 関連: #27 / #3 / #31 / source `ktan514/ai-liver-yura#470`
 状態: canonical architecture
 
 ## 1. 目的
 
-PostgreSQLをLoop Engineeringの運用状態（Operational State）の永続正本として使用する。
+PostgreSQLをLoop Engineeringの実行中作業状態の永続正本として使用する。再開時の作業選択済み状態、作業パケット、Checkpoint、未確定effect、lease、重複抑止はDBから復元する。
 
-GitHub liveのIssue、PR、Project、branch、厳密HEAD、CI、reviewは引き続き現在状態の正本であり、PostgreSQLへ複製した過去値で上書きしない。Mission GoalとProject Registrationのbootstrap trust anchorもDBだけへ依存させない。
+GitHub Issueは課題・受入条件・優先度・依存関係・完了判断と人間向け状況報告を所有する。PR、branch、厳密HEAD、CI、reviewは各外部提供元が実効果の正本であり、DB復元後に必要な対象だけを再照合する。詳細な責務境界は`work_state_and_issue_boundary.md`を正本とする。
 
 ```text
-GitHub live
-→ Productの現在状態
+GitHub Issue / Project
+→ 課題と作業の統括
 
 Host Mission Goal / Project Registration
 → 実行対象と安全境界
 
 PostgreSQL Operational Store
-→ Run / transition / checkpoint / blocker / lease / idempotency等の運用状態
+→ 実行作業 / 作業パケット / Checkpoint / effect / lease / 重複抑止
 ```
 
 ## 2. ローカル実運転の接続方式
@@ -117,23 +118,24 @@ Migrationは通常の観測とは分離した明示操作で行い、事前確�
 | `loop_dispatches` | Codex/review等のdispatch重複抑止 |
 | `loop_external_waits` | review/CI/Human等の待機identity |
 
-ProductのIssue/PR本文やcanonical design本文をDBへ丸ごとmirrorしない。必要な場合はstable identity、revision、digest、状態値、secret-safe metadataだけを保存する。
+ProductのIssue/PR本文やcanonical design本文をDBへ丸ごとmirrorしない。必要な場合はstable identity、revision、digest、状態値、secret-safe metadataだけを保存する。作業状態、作業パケット、再開Checkpoint、effect試行、Issue報告outboxはDBへ追加する。
 
 ## 7. restart / reconcile
 
-再起動時にDBだけからcurrent Workを決めない。
+再起動時はDBの作業記録と安全Checkpointからcurrent Workを復元する。Issue commentを探索して再開対象を決めない。
 
 ```text
 Operational State readback
-+ fresh GitHub live state
++ Issue / Projectの作業定義同期
++ 対象外部効果の限定再照合
 + Host Mission Goal / Project Registration
 → RECONCILE
 → Resume Gate
 ```
 
-DBは「前回どこまでeffectを要求・確認したか」「重複送信してよいか」「blocker/leaseが残っているか」を提供する。
+DBは「どの作業を選択し、前回どこまでeffectを要求・確認したか」「重複送信してよいか」「blocker/leaseが残っているか」を提供する。
 
-GitHub liveとDBが不一致なら、現在状態はGitHubを優先し、不一致自体をtyped conflict/evidenceとして記録する。
+Issueの定義変更とDBの未完了作業が不一致なら、同期競合として記録して再調整する。外部効果の不一致は対象提供元の読戻しを優先する。
 
 ## 8. idempotency / transaction
 
@@ -178,8 +180,9 @@ Yura Product Workspaceを対象に次を確認する。
 
 ## 11. Hard invariants
 
-- PostgreSQL Operational State != GitHub current-state Authority
-- Mission Goalの正本をDBだけへ移さない
+- PostgreSQLは再開する実行作業状態の正本である
+- Issueは課題・受入条件・完了判断の正本である
+- Issue commentを再開の機械入力にしない
 - Product Workspaceへ管理DB credentialを保存しない
 - passwordをcommand argvへ埋め込まない
 - Preflightはmigrationを自動適用しない
