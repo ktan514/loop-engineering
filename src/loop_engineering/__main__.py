@@ -113,7 +113,7 @@ def main() -> int:
         print(preflight_result.as_json())
         return 3 if preflight_result.status is PreflightStatus.BLOCKED else 0
 
-    from .host_entrypoint import run_actual_host_transition
+    from .durable_host_entrypoint import run_durable_actual_host_transition
 
     console = RuntimeConsole(platform_root, verbose=arguments.verbose)
     runner = VisibleSubprocessLocalRunner(console)
@@ -134,7 +134,7 @@ def main() -> int:
         while True:
             transition_number += 1
             console.event(f"遷移 {transition_number}: 開始")
-            transition_result = run_actual_host_transition(
+            transition_result = run_durable_actual_host_transition(
                 root=workspace_root,
                 environment=environment,
                 local_runner=runner,
