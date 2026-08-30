@@ -115,6 +115,8 @@ Work merge/readback/close完了後は、次の限定遷移でGitHub liveとProje
 
 この時点で「前Workは統合済みだが次Workはまだ未選択」という状態は起こり得る。これを即座に破損Checkpointとみなして古いWorkへfallbackしない。
 
+最新Checkpointが、`Mission state: ACTIVE`、完了したWork、統合済みPR、および次Workを最新状態から選択する次の操作（next action）を明示し、`current Work`を持たない場合は、この正常な計画境界として扱う。ホストは現在対象なしとして次Work計画へ遷移する。この判定は完了済み識別子だけでは行わず、上記の明示項目がそろわないCheckpointや、現在Workと矛盾するCheckpointは安全側停止にする。
+
 次Workが選択された後はCheckpointへ少なくとも`current Work`を明示する。有効PRがある場合だけ`current PR`と厳密HEADを記録し、存在しないPR / HEADを捏造しない。
 
 #27では次を検証する。
