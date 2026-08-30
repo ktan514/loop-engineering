@@ -83,8 +83,6 @@ class V2ResumeCoordinator:
             return V2ResumeResult(V2ResumeStatus.BLOCKED, "WORK_RECOVERY_MISSING", recovered)
 
         definition = self._definitions.synchronize(recovered.record)
-        if definition.status is WorkDefinitionStatus.COMPLETED:
-            return V2ResumeResult(V2ResumeStatus.COMPLETED, "WORK_COMPLETED", recovered)
         if definition.status is WorkDefinitionStatus.DEPENDENCY_PENDING:
             return V2ResumeResult(V2ResumeStatus.WAITING, "DEPENDENCY_PENDING", recovered)
         if definition.status is WorkDefinitionStatus.CLOSED_BEFORE_COMPLETION:
@@ -92,7 +90,8 @@ class V2ResumeCoordinator:
                 V2ResumeStatus.BLOCKED, "WORK_CLOSED_BEFORE_COMPLETION", recovered
             )
         synchronized = definition.record
-        if definition.status is not WorkDefinitionStatus.READY or synchronized is None:
+        accepted_statuses = {WorkDefinitionStatus.READY, WorkDefinitionStatus.COMPLETED}
+        if definition.status not in accepted_statuses or synchronized is None:
             return V2ResumeResult(
                 V2ResumeStatus.BLOCKED,
                 "WORK_DEFINITION_UNAVAILABLE",
@@ -120,6 +119,9 @@ class V2ResumeCoordinator:
                 recovered,
             )
 
+        if definition.status is WorkDefinitionStatus.COMPLETED:
+            return V2ResumeResult(V2ResumeStatus.COMPLETED, "WORK_COMPLETED", recovered)
+
         return V2ResumeResult(V2ResumeStatus.READY, "RESUME_READY", recovered)
 
 
@@ -143,4 +145,5 @@ def _same_work(before: WorkRecord, after: WorkRecord) -> bool:
         before.identity == after.identity
         and before.repository == after.repository
         and before.issue_number == after.issue_number
+        and before.issue_revision == after.issue_revision
     )

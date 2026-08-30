@@ -34,6 +34,7 @@ def test_synchronizes_only_typed_issue_and_project_fields() -> None:
                 {"field": {"name": "Start date"}, "date": "2026-09-02"},
                 {"field": {"name": "Acceptance criteria digest"}, "name": "sha256:abc"},
             ]}}]},
+            "blockedBy": {"nodes": [], "pageInfo": {"hasNextPage": False}},
         }}}}
     runner = Runner(json.dumps(payload), [])
 
@@ -63,7 +64,7 @@ def test_comment_updates_do_not_change_revision_and_open_dependency_waits() -> N
     issue = {
         "number": 65, "state": "OPEN",
         "updatedAt": "comment-update-only", "parent": {"number": 62, "state": "CLOSED"},
-        "blockedBy": {"nodes": []},
+        "blockedBy": {"nodes": [], "pageInfo": {"hasNextPage": False}},
         "projectItems": {"nodes": [{"project": {"number": 9}, "fieldValues": {"nodes": [
             {"field": {"name": "Acceptance criteria digest"}, "name": "sha256:abc"},
         ]}}]},
@@ -75,7 +76,10 @@ def test_comment_updates_do_not_change_revision_and_open_dependency_waits() -> N
     assert first.record is not None and second.record is not None
     assert first.record.issue_revision == second.record.issue_revision
 
-    issue["blockedBy"] = {"nodes": [{"number": 66, "state": "OPEN"}]}
+    issue["blockedBy"] = {
+        "nodes": [{"number": 66, "state": "OPEN"}],
+        "pageInfo": {"hasNextPage": False},
+    }
     adapter = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9)
     assert adapter.synchronize(record()).status is WorkDefinitionStatus.DEPENDENCY_PENDING
 
@@ -101,4 +105,7 @@ def test_text_digest_completed_closed_and_truncated_dependencies_are_safe() -> N
     issue["state"] = "OPEN"
     issue["blockedBy"] = {"nodes": [], "pageInfo": {"hasNextPage": True}}
     adapter = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9)
+    assert adapter.synchronize(record()).status is WorkDefinitionStatus.UNAVAILABLE
+
+    issue.pop("blockedBy")
     assert adapter.synchronize(record()).status is WorkDefinitionStatus.UNAVAILABLE

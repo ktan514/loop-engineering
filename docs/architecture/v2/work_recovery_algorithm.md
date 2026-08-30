@@ -29,9 +29,10 @@ READY(packet)
 RECONCILE_REQUIRED(effect identities)
 WAITING(reason)
 BLOCKED(reason)
+COMPLETED
 ```
 
-`READY`以外は新しい外部変更を開始しない。
+`READY`以外は新しい外部変更を開始しない。`COMPLETED`はIssue closedかつDB Workが`COMPLETED`であり、未確定effectの読戻し後にだけ返す終端状態である。
 
 ## 3. データモデル
 

@@ -179,13 +179,19 @@ def _mapping(value: Mapping[str, object], key: str) -> Mapping[str, object]:
 
 
 def _dependencies(issue: Mapping[str, object]) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
-    candidates: list[Mapping[str, object]] = []
-    blocked_by = _mapping(issue, "blockedBy")
-    if _mapping(blocked_by, "pageInfo").get("hasNextPage") is True:
+    blocked_value = issue.get("blockedBy")
+    if not isinstance(blocked_value, dict):
         return None
+    blocked_by = blocked_value
+    page_info = blocked_by.get("pageInfo")
     nodes = blocked_by.get("nodes")
-    if isinstance(nodes, list):
-        candidates.extend(node for node in nodes if isinstance(node, dict))
+    if not isinstance(page_info, dict) or not isinstance(page_info.get("hasNextPage"), bool):
+        return None
+    if page_info["hasNextPage"]:
+        return None
+    if not isinstance(nodes, list):
+        return None
+    candidates = [node for node in nodes if isinstance(node, dict)]
     identities: list[str] = []
     states: list[str] = []
     for candidate in candidates:
