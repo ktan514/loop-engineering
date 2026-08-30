@@ -8,6 +8,7 @@ from pathlib import Path
 from .config import LoopEngineeringSettings
 from .host_runtime import HostTransitionResult, HostTransitionStatus
 from .mission_goal import inject_mission_goal_environment
+from .operational_config import inject_operational_store_environment
 from .runtime_console import RuntimeConsole, VisibleSubprocessLocalRunner
 
 _CI_RECHECK_INITIAL_SECONDS = 60.0
@@ -22,6 +23,16 @@ def main() -> int:
         "--validate-installation",
         action="store_true",
         help="外部システムを観測・変更せずに制御系パッケージの導入状態を確認する。",
+    )
+    parser.add_argument(
+        "--preflight",
+        action="store_true",
+        help="CodexやGit mutationを開始せず、現在のHost能力だけを事前確認する。",
+    )
+    parser.add_argument(
+        "--migrate-operational-store",
+        action="store_true",
+        help="設定されたPostgreSQLへ未適用のversioned SQL migrationを明示適用する。",
     )
     parser.add_argument(
         "--config",
@@ -45,8 +56,6 @@ def main() -> int:
         print("LOOP_ENGINE_INSTALLATION=PASS")
         return 0
 
-    from .host_entrypoint import run_actual_host_transition
-
     platform_root = Path(__file__).resolve().parents[2]
     selected_config = Path(arguments.config) if arguments.config else None
     try:
@@ -54,6 +63,10 @@ def main() -> int:
             platform_root,
             os.environ,
             config_path=selected_config,
+        )
+        environment = inject_operational_store_environment(
+            settings.config_path,
+            settings.runtime_environment(os.environ),
         )
     except ValueError as error:
         print(f"CONFIGURATION_INVALID: {error}")
@@ -64,8 +77,44 @@ def main() -> int:
         platform_root=platform_root,
         product_root=workspace_root,
         repository=settings.engine.repository,
-        environment=settings.runtime_environment(os.environ),
+        environment=environment,
     )
+
+    if arguments.migrate_operational_store:
+        from .postgres_runtime import PostgreSQLCommandAdapter
+        from .preflight import SubprocessCommandRunner
+
+        migration_result = PostgreSQLCommandAdapter(
+            SubprocessCommandRunner(),
+            environment,
+        ).apply_migrations()
+        applied = ",".join(migration_result.applied) if migration_result.applied else "なし"
+        print(
+            "OPERATIONAL_STORE_MIGRATION="
+            f"{'PASS' if migration_result.succeeded else 'FAIL'} "
+            f"detail={migration_result.detail} applied={applied}"
+        )
+        return 0 if migration_result.succeeded else 3
+
+    if arguments.preflight:
+        from .preflight import (
+            EnvironmentCapabilityPreflight,
+            PreflightStatus,
+            SubprocessCommandRunner,
+        )
+
+        preflight_result = EnvironmentCapabilityPreflight(
+            settings.engine,
+            SubprocessCommandRunner(),
+            environment,
+            project_root=workspace_root,
+        ).run()
+        print(f"MISSION_GOAL_PATH = {environment.get('LOOP_MISSION_GOAL_PATH', '')}")
+        print(preflight_result.as_json())
+        return 3 if preflight_result.status is PreflightStatus.BLOCKED else 0
+
+    from .host_entrypoint import run_actual_host_transition
+
     console = RuntimeConsole(platform_root, verbose=arguments.verbose)
     runner = VisibleSubprocessLocalRunner(console)
     mode = "once" if arguments.once else "continuous"
@@ -85,7 +134,7 @@ def main() -> int:
         while True:
             transition_number += 1
             console.event(f"遷移 {transition_number}: 開始")
-            result = run_actual_host_transition(
+            transition_result = run_actual_host_transition(
                 root=workspace_root,
                 environment=environment,
                 local_runner=runner,
@@ -93,19 +142,19 @@ def main() -> int:
             )
             console.event(
                 f"遷移 {transition_number}: "
-                f"{result.status.value} 詳細={result.detail}"
+                f"{transition_result.status.value} 詳細={transition_result.detail}"
             )
 
             if arguments.once:
-                print(result.as_json())
-                return _exit_code(result)
+                print(transition_result.as_json())
+                return _exit_code(transition_result)
 
-            if result.status is HostTransitionStatus.COMPLETED:
+            if transition_result.status is HostTransitionStatus.COMPLETED:
                 completed_key = (
-                    result.detail,
-                    result.work_issue,
-                    result.pr_number,
-                    result.head_sha,
+                    transition_result.detail,
+                    transition_result.work_issue,
+                    transition_result.pr_number,
+                    transition_result.head_sha,
                 )
                 if completed_key == previous_completed:
                     identical_completed += 1
@@ -116,9 +165,9 @@ def main() -> int:
                     blocked = HostTransitionResult(
                         HostTransitionStatus.INTERVENTION_REQUIRED,
                         "NO_PROGRESS_GUARD",
-                        result.work_issue,
-                        result.pr_number,
-                        result.head_sha,
+                        transition_result.work_issue,
+                        transition_result.pr_number,
+                        transition_result.head_sha,
                     )
                     console.event("進捗停止検知: 同一の完了遷移が繰り返されました")
                     print(blocked.as_json())
@@ -131,8 +180,8 @@ def main() -> int:
             identical_completed = 0
 
             if (
-                result.status is HostTransitionStatus.YIELD_EXTERNAL
-                and result.detail == "CI_PENDING"
+                transition_result.status is HostTransitionStatus.YIELD_EXTERNAL
+                and transition_result.detail == "CI_PENDING"
             ):
                 console.event(
                     f"CI待機: {int(ci_wait_seconds)}秒後に自動再開します"
@@ -144,8 +193,8 @@ def main() -> int:
                 )
                 continue
 
-            print(result.as_json())
-            return _exit_code(result)
+            print(transition_result.as_json())
+            return _exit_code(transition_result)
     except KeyboardInterrupt:
         console.event("操作者の要求により停止します")
         return 130

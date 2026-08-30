@@ -14,6 +14,8 @@ from urllib.parse import urlsplit
 
 from .config import LoopEngineConfig, LoopEngineeringSettings
 from .mission_goal import inject_mission_goal_environment, read_mission_goal_identity
+from .operational_config import inject_operational_store_environment
+from .postgres_runtime import PostgreSQLCommandAdapter
 
 
 class PreflightStatus(str, Enum):
@@ -132,7 +134,8 @@ class EnvironmentCapabilityPreflight:
         capability["project_venv"] = sys.prefix != sys.base_prefix
         capability["trusted_reviewer"] = self._reviewer_available()
         capability.update(self._postgresql_capabilities())
-        blocking_names = (
+
+        blocking_names: tuple[str, ...] = (
             "workspace_path",
             "workspace_git_root",
             "workspace_repository_match",
@@ -152,14 +155,27 @@ class EnvironmentCapabilityPreflight:
             "compileall",
             "codex_cli",
         )
-        scoped_names = (
-            "trusted_reviewer",
-            "docker",
+        scoped_names: tuple[str, ...] = ("trusted_reviewer",)
+        postgres_names = (
             "postgresql_client",
             "postgresql_server",
             "postgresql_database",
             "postgresql_migration",
         )
+        postgres_required = (
+            self._environment.get("LOOP_OPERATIONAL_STORE_REQUIRED", "false").strip().lower()
+            == "true"
+        )
+        postgres_driver = self._environment.get("LOOP_POSTGRES_DRIVER", "host").strip()
+        if postgres_required:
+            blocking_names += postgres_names
+            if postgres_driver == "docker":
+                blocking_names += ("docker",)
+        else:
+            scoped_names += postgres_names
+            if postgres_driver == "docker":
+                scoped_names += ("docker",)
+
         blocking = tuple(name.upper() for name in blocking_names if not capability[name])
         scoped = tuple(name.upper() for name in scoped_names if not capability[name])
         status = (
@@ -207,7 +223,6 @@ class EnvironmentCapabilityPreflight:
             "compileall": (sys.executable, "-m", "compileall", "--help"),
             "codex_cli": ("codex", "--version"),
             "docker": ("docker", "version"),
-            "postgresql_client": ("psql", "--version"),
         }
         capability = {
             name: self._run(name, command).succeeded for name, command in probes.items()
@@ -292,53 +307,18 @@ class EnvironmentCapabilityPreflight:
         return bool(socket_path and self._reviewer_probe.check(socket_path, 10.0))
 
     def _postgresql_capabilities(self) -> dict[str, bool]:
-        url = self._environment.get("LOOP_POSTGRES_DSN") or self._environment.get(
-            "LOOP_DATABASE_URL"
-        )
-        if not url:
-            return self._empty_database_capabilities()
-        parsed = urlsplit(url)
-        if parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname:
-            return self._empty_database_capabilities()
-        try:
-            port = parsed.port
-        except ValueError:
-            return self._empty_database_capabilities()
-        database_env = {
-            "PATH": self._environment.get("PATH", os.defpath),
-            "PGHOST": parsed.hostname,
-            "PGPORT": str(port or 5432),
-            "PGUSER": parsed.username or "",
-            "PGPASSWORD": parsed.password or "",
-            "PGDATABASE": parsed.path.lstrip("/"),
-        }
-        server = self._run("postgresql_server", ("pg_isready",), database_env).succeeded
-        database = server and self._run(
-            "postgresql_database",
-            ("psql", "-Atqc", "SELECT 1"),
-            database_env,
-        ).succeeded
-        migration = (
-            database
-            and (self._project_root / "alembic.ini").is_file()
-            and self._run(
-                "postgresql_migration",
-                (sys.executable, "-m", "alembic", "current"),
-                database_env,
-            ).succeeded
-        )
+        capabilities = PostgreSQLCommandAdapter(self._runner, self._environment).probe()
+        migration = capabilities.migration
+        if (
+            self._environment.get("LOOP_POSTGRES_MIGRATION_POLICY", "required").strip()
+            == "ignore"
+        ):
+            migration = capabilities.database
         return {
-            "postgresql_server": server,
-            "postgresql_database": database,
+            "postgresql_client": capabilities.client,
+            "postgresql_server": capabilities.server,
+            "postgresql_database": capabilities.database,
             "postgresql_migration": migration,
-        }
-
-    @staticmethod
-    def _empty_database_capabilities() -> dict[str, bool]:
-        return {
-            "postgresql_server": False,
-            "postgresql_database": False,
-            "postgresql_migration": False,
         }
 
     def _mission_goal_matches(self) -> bool:
@@ -388,11 +368,15 @@ def _repository_from_remote(value: str) -> str | None:
 def main() -> None:
     platform_root = Path(__file__).resolve().parents[2]
     settings = LoopEngineeringSettings.load(platform_root)
+    environment = inject_operational_store_environment(
+        settings.config_path,
+        settings.canonical_environment(),
+    )
     environment = inject_mission_goal_environment(
         platform_root=platform_root,
         product_root=settings.workspace_path,
         repository=settings.engine.repository,
-        environment=settings.canonical_environment(),
+        environment=environment,
     )
     print(
         EnvironmentCapabilityPreflight(

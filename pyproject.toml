@@ -13,6 +13,9 @@ dependencies = []
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+loop_engineering = ["migrations/*.sql"]
+
 [tool.pytest.ini_options]
 addopts = "-q"
 pythonpath = ["src"]

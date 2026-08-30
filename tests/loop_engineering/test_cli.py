@@ -31,6 +31,11 @@ def install_fake_settings(monkeypatch: MonkeyPatch) -> None:
         "load",
         classmethod(lambda cls, *args, **kwargs: FakeSettings()),
     )
+    monkeypatch.setattr(
+        cli,
+        "inject_operational_store_environment",
+        lambda config_path, environment: dict(environment),
+    )
 
 
 def test_cli_validates_installation_without_external_mutation() -> None:
