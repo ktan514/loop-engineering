@@ -283,6 +283,10 @@ def test_packet_intent_checkpoint_and_work_lease_are_one_transaction() -> None:
     assert "loop_work_checkpoints" in transaction
     assert "'INTENT_RECORDED'" in transaction
     assert "'EFFECT_PENDING'" in transaction
+    assert "status IN ('INTENT_RECORDED', 'UNCERTAIN')" in transaction
+    assert transaction.count("ON CONFLICT") == 1
+    assert "ON CONFLICT (identity) DO NOTHING" not in transaction
+    assert "ON CONFLICT (idempotency_key) DO NOTHING" not in transaction
 
 
 def test_lease_conflict_never_issues_packet_or_starts_external_effect() -> None:
