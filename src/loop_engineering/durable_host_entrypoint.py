@@ -24,6 +24,7 @@ from .mission_goal import inject_mission_goal_environment
 from .postgres_runtime import PostgreSQLCommandAdapter
 from .preflight import (
     EnvironmentCapabilityPreflight,
+    PreflightResult,
     PreflightStatus,
     SubprocessCommandRunner,
 )
@@ -129,11 +130,10 @@ def run_durable_actual_host_transition(
     ).run_once()
 
 
-def _project_rate_limit_is_only_blocker(preflight: object) -> bool:
-    diagnostics = getattr(preflight, "diagnostics", ())
-    blockers = set(getattr(preflight, "blocking_for_loop_bootstrap", ()))
+def _project_rate_limit_is_only_blocker(preflight: PreflightResult) -> bool:
+    blockers = set(preflight.blocking_for_loop_bootstrap)
     return (
-        _PROJECT_RATE_LIMIT_DIAGNOSTIC in diagnostics
+        _PROJECT_RATE_LIMIT_DIAGNOSTIC in preflight.diagnostics
         and bool(blockers)
         and blockers <= _PROJECT_BLOCKERS
     )
