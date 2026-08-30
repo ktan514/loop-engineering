@@ -11,6 +11,7 @@ from .work_state import EffectAttempt, RecoveredWork, WorkRecord
 
 class V2ResumeStatus(str, Enum):
     READY = "READY"
+    COMPLETED = "COMPLETED"
     RECONCILE_REQUIRED = "RECONCILE_REQUIRED"
     WAITING = "WAITING"
     BLOCKED = "BLOCKED"
@@ -31,6 +32,7 @@ class V2ResumeResult:
 
 class WorkDefinitionStatus(str, Enum):
     READY = "READY"
+    COMPLETED = "COMPLETED"
     UNAVAILABLE = "UNAVAILABLE"
     CLOSED_BEFORE_COMPLETION = "CLOSED_BEFORE_COMPLETION"
     DEPENDENCY_PENDING = "DEPENDENCY_PENDING"
@@ -81,6 +83,8 @@ class V2ResumeCoordinator:
             return V2ResumeResult(V2ResumeStatus.BLOCKED, "WORK_RECOVERY_MISSING", recovered)
 
         definition = self._definitions.synchronize(recovered.record)
+        if definition.status is WorkDefinitionStatus.COMPLETED:
+            return V2ResumeResult(V2ResumeStatus.COMPLETED, "WORK_COMPLETED", recovered)
         if definition.status is WorkDefinitionStatus.DEPENDENCY_PENDING:
             return V2ResumeResult(V2ResumeStatus.WAITING, "DEPENDENCY_PENDING", recovered)
         if definition.status is WorkDefinitionStatus.CLOSED_BEFORE_COMPLETION:

@@ -71,7 +71,7 @@ class GitHubWorkDefinitionAdapter:
         if snapshot.issue_state == "CLOSED" and current.lifecycle != "COMPLETED":
             return WorkDefinitionResult(WorkDefinitionStatus.CLOSED_BEFORE_COMPLETION)
         if snapshot.issue_state == "CLOSED":
-            return WorkDefinitionResult(WorkDefinitionStatus.READY, current)
+            return WorkDefinitionResult(WorkDefinitionStatus.COMPLETED, current)
         if snapshot.blocking_reason is not None:
             return WorkDefinitionResult(WorkDefinitionStatus.DEPENDENCY_PENDING)
         if snapshot.acceptance_criteria_digest is None:
@@ -102,7 +102,7 @@ class GitHubWorkDefinitionAdapter:
             "name}}name}"
             "... on ProjectV2ItemFieldDateValue{field{... on ProjectV2FieldCommon{name}}date}"
             "... on ProjectV2ItemFieldTextValue{field{... on ProjectV2FieldCommon{name}}text}"
-            "}}}}}}}"
+            "}pageInfo{hasNextPage}}}}}}}"
         )
         try:
             raw = self._runner.run(
@@ -154,7 +154,10 @@ def _project_values(
         if not isinstance(item, dict) or _mapping(item, "project").get("number") != project_number:
             continue
         values: dict[str, str | None] = {}
-        nodes = _mapping(item, "fieldValues").get("nodes")
+        field_values = _mapping(item, "fieldValues")
+        if _mapping(field_values, "pageInfo").get("hasNextPage") is True:
+            return None
+        nodes = field_values.get("nodes")
         if not isinstance(nodes, list):
             return None
         for node in nodes:

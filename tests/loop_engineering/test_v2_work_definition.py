@@ -96,9 +96,9 @@ def test_text_digest_completed_closed_and_truncated_dependencies_are_safe() -> N
     issue["state"] = "CLOSED"
     completed = WorkRecord("work:repo:65", "ktan514/loop-engineering", 65, "old", "COMPLETED")
     adapter = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9)
-    assert adapter.synchronize(completed).status is WorkDefinitionStatus.READY
+    assert adapter.synchronize(completed).status is WorkDefinitionStatus.COMPLETED
 
     issue["state"] = "OPEN"
-    issue["blockedBy"]["pageInfo"] = {"hasNextPage": True}
+    issue["blockedBy"] = {"nodes": [], "pageInfo": {"hasNextPage": True}}
     adapter = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9)
     assert adapter.synchronize(record()).status is WorkDefinitionStatus.UNAVAILABLE
