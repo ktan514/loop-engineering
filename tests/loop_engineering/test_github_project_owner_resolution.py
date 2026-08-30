@@ -6,6 +6,7 @@ from pathlib import Path
 from loop_engineering.preflight import (
     CommandResult,
     EnvironmentCapabilityPreflight,
+    PreflightResult,
 )
 
 from .conftest import config
@@ -69,7 +70,7 @@ def _environment(root: Path) -> dict[str, str]:
     }
 
 
-def _run(tmp_path: Path, owner: object) -> tuple[OwnerProbeRunner, object]:
+def _run(tmp_path: Path, owner: object) -> tuple[OwnerProbeRunner, PreflightResult]:
     runner = OwnerProbeRunner(tmp_path, owner=owner)
     result = EnvironmentCapabilityPreflight(
         config(),
