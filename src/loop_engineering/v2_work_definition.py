@@ -68,8 +68,10 @@ class GitHubWorkDefinitionAdapter:
         snapshot = self._snapshot(current.repository, current.issue_number)
         if snapshot is None:
             return WorkDefinitionResult(WorkDefinitionStatus.UNAVAILABLE)
-        if snapshot.issue_state == "CLOSED":
+        if snapshot.issue_state == "CLOSED" and current.lifecycle != "COMPLETED":
             return WorkDefinitionResult(WorkDefinitionStatus.CLOSED_BEFORE_COMPLETION)
+        if snapshot.issue_state == "CLOSED":
+            return WorkDefinitionResult(WorkDefinitionStatus.READY, current)
         if snapshot.blocking_reason is not None:
             return WorkDefinitionResult(WorkDefinitionStatus.DEPENDENCY_PENDING)
         if snapshot.acceptance_criteria_digest is None:
@@ -93,11 +95,13 @@ class GitHubWorkDefinitionAdapter:
         query = (
             "query($owner:String!,$name:String!,$issue:Int!){"
             "repository(owner:$owner,name:$name){issue(number:$issue){number state "
-            "blockedBy(first:50){nodes{repository{nameWithOwner} number state}} "
+            "blockedBy(first:50){nodes{repository{nameWithOwner} number state}"
+            "pageInfo{hasNextPage}} "
             "projectItems(first:20){nodes{project{number} fieldValues(first:20){nodes{"
             "... on ProjectV2ItemFieldSingleSelectValue{field{... on ProjectV2FieldCommon{"
             "name}}name}"
             "... on ProjectV2ItemFieldDateValue{field{... on ProjectV2FieldCommon{name}}date}"
+            "... on ProjectV2ItemFieldTextValue{field{... on ProjectV2FieldCommon{name}}text}"
             "}}}}}}}"
         )
         try:
@@ -122,7 +126,10 @@ class GitHubWorkDefinitionAdapter:
         values = _project_values(issue, self._project_number)
         if values is None:
             return None
-        identities, states = _dependencies(issue)
+        dependencies = _dependencies(issue)
+        if dependencies is None:
+            return None
+        identities, states = dependencies
         return WorkDefinitionSnapshot(
             repository,
             issue_number,
@@ -155,6 +162,8 @@ def _project_values(
                 continue
             name = _mapping(node, "field").get("name")
             value = node.get("name") if isinstance(node.get("name"), str) else node.get("date")
+            if not isinstance(value, str):
+                value = node.get("text")
             if isinstance(name, str) and (value is None or isinstance(value, str)):
                 values[name] = value
         return values
@@ -166,9 +175,12 @@ def _mapping(value: Mapping[str, object], key: str) -> Mapping[str, object]:
     return nested if isinstance(nested, dict) else {}
 
 
-def _dependencies(issue: Mapping[str, object]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def _dependencies(issue: Mapping[str, object]) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
     candidates: list[Mapping[str, object]] = []
-    nodes = _mapping(issue, "blockedBy").get("nodes")
+    blocked_by = _mapping(issue, "blockedBy")
+    if _mapping(blocked_by, "pageInfo").get("hasNextPage") is True:
+        return None
+    nodes = blocked_by.get("nodes")
     if isinstance(nodes, list):
         candidates.extend(node for node in nodes if isinstance(node, dict))
     identities: list[str] = []

@@ -78,3 +78,27 @@ def test_comment_updates_do_not_change_revision_and_open_dependency_waits() -> N
     issue["blockedBy"] = {"nodes": [{"number": 66, "state": "OPEN"}]}
     adapter = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9)
     assert adapter.synchronize(record()).status is WorkDefinitionStatus.DEPENDENCY_PENDING
+
+
+def test_text_digest_completed_closed_and_truncated_dependencies_are_safe() -> None:
+    issue = {
+        "number": 65,
+        "state": "OPEN",
+        "blockedBy": {"nodes": [], "pageInfo": {"hasNextPage": False}},
+        "projectItems": {"nodes": [{"project": {"number": 9}, "fieldValues": {"nodes": [
+            {"field": {"name": "Acceptance criteria digest"}, "text": "digest:65"},
+        ]}}]},
+    }
+    payload = {"data": {"repository": {"issue": issue}}}
+    result = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9).synchronize(record())
+    assert result.status is WorkDefinitionStatus.READY
+
+    issue["state"] = "CLOSED"
+    completed = WorkRecord("work:repo:65", "ktan514/loop-engineering", 65, "old", "COMPLETED")
+    adapter = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9)
+    assert adapter.synchronize(completed).status is WorkDefinitionStatus.READY
+
+    issue["state"] = "OPEN"
+    issue["blockedBy"]["pageInfo"] = {"hasNextPage": True}
+    adapter = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9)
+    assert adapter.synchronize(record()).status is WorkDefinitionStatus.UNAVAILABLE
