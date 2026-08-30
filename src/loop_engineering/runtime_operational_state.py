@@ -298,7 +298,23 @@ class DurableHostTransitionCoordinator:
         run_identity = uuid.uuid4().hex
         try:
             previous = self._store.latest_unfinished(self._project_key, self._repository)
+        except OperationalStateUnavailable:
+            if self._required:
+                return HostTransitionResult(
+                    HostTransitionStatus.INTERVENTION_REQUIRED,
+                    "OPERATIONAL_STORE_UNAVAILABLE",
+                )
+            return self._controller.run_once()
+
+        try:
             fresh = self._mission.current_target()
+        except RuntimeError:
+            return HostTransitionResult(
+                HostTransitionStatus.INTERVENTION_REQUIRED,
+                "GITHUB_OBSERVE_FAILED",
+            )
+
+        try:
             if previous is not None:
                 reconciliation = self._reconcile_previous(previous, fresh)
                 if reconciliation is not None:
@@ -318,7 +334,7 @@ class DurableHostTransitionCoordinator:
                 self._store.record_blocker(run_identity, result)
                 self._store.finish_run(run_identity, result.status.value)
                 return result
-        except (OperationalStateUnavailable, RuntimeError):
+        except OperationalStateUnavailable:
             if self._required:
                 return HostTransitionResult(
                     HostTransitionStatus.INTERVENTION_REQUIRED,
