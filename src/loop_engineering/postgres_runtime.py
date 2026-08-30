@@ -71,7 +71,7 @@ class PostgreSQLCommandAdapter:
             return PostgreSQLCapabilities(False, False, False, False)
 
         client = self._run_client(("psql", "--version"), parsed).succeeded
-        server = client and self._run_client(("pg_isready", "-q"), parsed).succeeded
+        server = client and self._run_client(("pg_isready",), parsed).succeeded
         database = server and self._run_client(
             ("psql", "-Atqc", "SELECT 1"), parsed
         ).succeeded
@@ -88,7 +88,7 @@ class PostgreSQLCommandAdapter:
             return MigrationApplyResult(False, (), "POSTGRES_CONTAINER_UNSET")
         if not self._run_client(("psql", "--version"), parsed).succeeded:
             return MigrationApplyResult(False, (), "POSTGRES_CLIENT_UNAVAILABLE")
-        if not self._run_client(("pg_isready", "-q"), parsed).succeeded:
+        if not self._run_client(("pg_isready",), parsed).succeeded:
             return MigrationApplyResult(False, (), "POSTGRES_SERVER_UNAVAILABLE")
         if not self._run_client(("psql", "-Atqc", "SELECT 1"), parsed).succeeded:
             return MigrationApplyResult(False, (), "POSTGRES_DATABASE_UNAVAILABLE")
