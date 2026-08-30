@@ -1,15 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-
 from loop_engineering.operational_state_check import check_operational_state_round_trip
-
-
-@dataclass(frozen=True)
-class Result:
-    succeeded: bool
-    output: str = ""
 
 
 class FakeDatabase:
@@ -49,7 +40,7 @@ def test_round_trip_writes_reads_and_finalizes_without_product_effect() -> None:
     database = FakeDatabase()
 
     result = check_operational_state_round_trip(
-        database,  # type: ignore[arg-type]
+        database,
         project_key="ai-liver-yura",
         repository="ktan514/ai-liver-yura",
     )
@@ -64,7 +55,7 @@ def test_round_trip_write_failure_is_typed() -> None:
     database = FakeDatabase(fail_write=True)
 
     result = check_operational_state_round_trip(
-        database,  # type: ignore[arg-type]
+        database,
         project_key="ai-liver-yura",
         repository="ktan514/ai-liver-yura",
     )
