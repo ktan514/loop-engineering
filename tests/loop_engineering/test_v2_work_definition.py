@@ -43,7 +43,7 @@ def test_synchronizes_only_typed_issue_and_project_fields() -> None:
     assert len(runner.calls) == 1
     command = " ".join(runner.calls[0])
     assert "projectItems" in command
-    assert "body" not in command
+    assert " body " in command
     assert "comments" not in command
 
 
@@ -53,4 +53,23 @@ def test_closed_or_missing_project_is_unavailable() -> None:
         "projectItems": {"nodes": []},
     }}}}
     adapter = GitHubWorkDefinitionAdapter(Runner(json.dumps(closed), []), 9)
+    assert adapter.synchronize(record()) is None
+
+
+def test_comment_updates_do_not_change_revision_and_open_dependency_waits() -> None:
+    issue = {
+        "number": 65, "state": "OPEN", "body": "## 受入条件\n\n- 同期する",
+        "updatedAt": "comment-update-only", "parent": {"number": 62, "state": "CLOSED"},
+        "trackedIssues": {"nodes": []},
+        "projectItems": {"nodes": [{"project": {"number": 9}, "fieldValues": {"nodes": []}}]},
+    }
+    payload = {"data": {"repository": {"issue": issue}}}
+    first = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9).synchronize(record())
+    issue["updatedAt"] = "another-comment-update"
+    second = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9).synchronize(record())
+    assert first is not None and second is not None
+    assert first.issue_revision == second.issue_revision
+
+    issue["trackedIssues"] = {"nodes": [{"number": 66, "state": "OPEN"}]}
+    adapter = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9)
     assert adapter.synchronize(record()) is None

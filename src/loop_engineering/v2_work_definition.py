@@ -20,7 +20,9 @@ class WorkDefinitionSnapshot:
     repository: str
     issue_number: int
     issue_state: str
-    issue_updated_at: str
+    acceptance_criteria_digest: str
+    dependency_identities: tuple[str, ...]
+    dependency_states: tuple[str, ...]
     project_status: str | None
     priority: str | None
     start_date: str | None
@@ -32,7 +34,8 @@ class WorkDefinitionSnapshot:
             {
                 "issue": self.issue_number,
                 "state": self.issue_state,
-                "updated_at": self.issue_updated_at,
+                "acceptance_criteria_digest": self.acceptance_criteria_digest,
+                "dependencies": self.dependency_identities,
                 "project_status": self.project_status,
                 "priority": self.priority,
                 "start_date": self.start_date,
@@ -44,6 +47,14 @@ class WorkDefinitionSnapshot:
         )
         return "definition:" + hashlib.sha256(payload.encode()).hexdigest()
 
+    @property
+    def blocking_reason(self) -> str | None:
+        if self.issue_state == "CLOSED":
+            return "WORK_CLOSED_BEFORE_COMPLETION"
+        if any(state != "CLOSED" for state in self.dependency_states):
+            return "DEPENDENCY_PENDING"
+        return None
+
 
 class GitHubWorkDefinitionAdapter:
     """対象IssueとそのProject項目だけを1回のGraphQL読取りで同期する。"""
@@ -54,7 +65,7 @@ class GitHubWorkDefinitionAdapter:
 
     def synchronize(self, current: WorkRecord) -> WorkRecord | None:
         snapshot = self._snapshot(current.repository, current.issue_number)
-        if snapshot is None or snapshot.issue_state != "OPEN":
+        if snapshot is None or snapshot.blocking_reason is not None:
             return None
         return WorkRecord(
             identity=current.identity,
@@ -73,8 +84,9 @@ class GitHubWorkDefinitionAdapter:
             return None
         owner, name = repository.split("/", maxsplit=1)
         query = (
-            "query($owner:String!,$name:String!,$issue:Int!,$project:Int!){"
-            "repository(owner:$owner,name:$name){issue(number:$issue){number state updatedAt "
+            "query($owner:String!,$name:String!,$issue:Int!){"
+            "repository(owner:$owner,name:$name){issue(number:$issue){number state body "
+            "parent{number state} trackedIssues(first:50){nodes{number state}} "
             "projectItems(first:20){nodes{project{number} fieldValues(first:20){nodes{"
             "... on ProjectV2ItemFieldSingleSelectValue{field{... on ProjectV2FieldCommon{"
             "name}}name}"
@@ -85,8 +97,7 @@ class GitHubWorkDefinitionAdapter:
             raw = self._runner.run(
                 (
                     "gh", "api", "graphql", "-f", f"query={query}", "-f", f"owner={owner}",
-                    "-f", f"name={name}", "-F", f"issue={issue_number}", "-F",
-                    f"project={self._project_number}",
+                    "-f", f"name={name}", "-F", f"issue={issue_number}",
                 )
             )
             payload = json.loads(raw)
@@ -95,15 +106,17 @@ class GitHubWorkDefinitionAdapter:
         issue = _mapping(_mapping(_mapping(payload, "data"), "repository"), "issue")
         number = issue.get("number")
         state = issue.get("state")
-        updated_at = issue.get("updatedAt")
-        if number != issue_number or not isinstance(state, str) or not isinstance(updated_at, str):
+        body = issue.get("body")
+        if number != issue_number or not isinstance(state, str) or not isinstance(body, str):
             return None
         values = _project_values(issue, self._project_number)
         if values is None:
             return None
+        identities, states = _dependencies(issue)
         return WorkDefinitionSnapshot(
-            repository, issue_number, state, updated_at, values.get("Status"),
-            values.get("Priority"), values.get("Start date"), values.get("Target date"),
+            repository, issue_number, state, _digest(body), identities, states,
+            values.get("Status"), values.get("Priority"), values.get("Start date"),
+            values.get("Target date"),
         )
 
 
@@ -134,3 +147,25 @@ def _project_values(
 def _mapping(value: Mapping[str, object], key: str) -> Mapping[str, object]:
     nested = value.get(key)
     return nested if isinstance(nested, dict) else {}
+
+
+def _digest(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _dependencies(issue: Mapping[str, object]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    candidates: list[Mapping[str, object]] = []
+    parent = _mapping(issue, "parent")
+    if parent:
+        candidates.append(parent)
+    nodes = _mapping(issue, "trackedIssues").get("nodes")
+    if isinstance(nodes, list):
+        candidates.extend(node for node in nodes if isinstance(node, dict))
+    identities: list[str] = []
+    states: list[str] = []
+    for candidate in candidates:
+        number, state = candidate.get("number"), candidate.get("state")
+        if isinstance(number, int) and isinstance(state, str):
+            identities.append(f"issue:{number}")
+            states.append(state)
+    return tuple(identities), tuple(states)
