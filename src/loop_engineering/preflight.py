@@ -268,12 +268,14 @@ class EnvironmentCapabilityPreflight:
             return False
 
     def _project_access(self) -> tuple[bool, bool]:
+        owner = self._config.owner
+        number = self._config.project_number
         query = (
-            "query { user(login: "
-            f'"{self._config.owner}"'
-            ") { projectV2(number: "
-            f"{self._config.project_number}"
-            ") { viewerCanUpdate } } }"
+            "query { "
+            f'user(login: "{owner}") {{ projectV2(number: {number}) {{ viewerCanUpdate }} }} '
+            f'organization(login: "{owner}") '
+            f"{{ projectV2(number: {number}) {{ viewerCanUpdate }} }} "
+            "}"
         )
         result = self._run(
             "github_project_access",
@@ -284,12 +286,19 @@ class EnvironmentCapabilityPreflight:
                 self._github_project_rate_limited = True
             return False, False
         try:
-            project = json.loads(result.output)["data"]["user"]["projectV2"]
+            data = json.loads(result.output)["data"]
         except (KeyError, TypeError, json.JSONDecodeError):
             return False, False
-        if not isinstance(project, dict):
+        if not isinstance(data, dict):
             return False, False
-        return True, project.get("viewerCanUpdate") is True
+        for owner_kind in ("user", "organization"):
+            owner_value = data.get(owner_kind)
+            if not isinstance(owner_value, dict):
+                continue
+            project = owner_value.get("projectV2")
+            if isinstance(project, dict):
+                return True, project.get("viewerCanUpdate") is True
+        return False, False
 
     def _reviewer_available(self) -> bool:
         socket_path = self._environment.get("LOOP_TRUSTED_REVIEWER_SOCKET")
