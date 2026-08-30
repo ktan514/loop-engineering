@@ -8,6 +8,7 @@ from loop_engineering.work_state import (
     EffectAttempt,
     PostgreSQLWorkStateStore,
     WorkCheckpoint,
+    WorkLease,
     WorkRecord,
     WorkStateUnavailable,
     WorkTaskPacket,
@@ -20,6 +21,7 @@ class Database:
     query_results: list[list[dict[str, object]]] | None = None
     statements: list[str] = field(default_factory=list)
     writable: bool = True
+    transaction_result: dict[str, object] | None = None
 
     def execute_sql(self, sql: str) -> bool:
         self.statements.append(sql)
@@ -30,6 +32,10 @@ class Database:
         if self.query_results is not None:
             return self.query_results.pop(0)
         return self.rows
+
+    def execute_transaction_json(self, sql: str) -> dict[str, object] | None:
+        self.statements.append(sql)
+        return self.transaction_result
 
 
 def record() -> WorkRecord:
@@ -230,3 +236,110 @@ def test_invalid_lifecycle_and_database_write_failure_fail_closed() -> None:
         )
     with pytest.raises(WorkStateUnavailable, match="WORK_STATE_WRITE_FAILED"):
         PostgreSQLWorkStateStore(Database(writable=False)).upsert_work(record())
+
+
+def test_packet_intent_checkpoint_and_work_lease_are_one_transaction() -> None:
+    database = Database(transaction_result={"acquired": True})
+    store = PostgreSQLWorkStateStore(database)
+    packet = WorkTaskPacket(
+        identity="packet:62:2",
+        work_identity=record().identity,
+        generation=2,
+        transition="IMPLEMENT",
+        status="STARTED",
+        canonical_design_identities=("design:62",),
+    )
+    effect = EffectAttempt(
+        idempotency_key="effect:62:2",
+        work_identity=record().identity,
+        kind="PUSH",
+        target_identity="branch:feature/v2",
+        status="INTENT_RECORDED",
+    )
+    checkpoint = WorkCheckpoint(
+        identity="checkpoint:62:3",
+        work_identity=record().identity,
+        run_identity="run:3",
+        task_packet_identity=packet.identity,
+        checkpoint_kind="EFFECT_PENDING",
+        resumable_state="EFFECT_INTENT_RECORDED",
+        next_action="外部効果を実行する",
+    )
+
+    assert store.issue_packet_transaction(
+        record=record(),
+        lease=WorkLease(record().identity, "run:3", 2, 300),
+        packet=packet,
+        effect=effect,
+        checkpoint=checkpoint,
+    )
+
+    assert len(database.statements) == 1
+    transaction = database.statements[0]
+    assert transaction.startswith("WITH eligible AS")
+    assert "loop_work_leases" in transaction
+    assert "loop_task_packets" in transaction
+    assert "loop_effect_attempts" in transaction
+    assert "loop_work_checkpoints" in transaction
+    assert "'INTENT_RECORDED'" in transaction
+    assert "'EFFECT_PENDING'" in transaction
+    assert "status IN ('INTENT_RECORDED', 'UNCERTAIN')" in transaction
+    assert transaction.count("ON CONFLICT") == 1
+    assert "ON CONFLICT (identity) DO NOTHING" not in transaction
+    assert "ON CONFLICT (idempotency_key) DO NOTHING" not in transaction
+
+
+def test_lease_conflict_never_issues_packet_or_starts_external_effect() -> None:
+    database = Database(transaction_result={"acquired": False})
+    store = PostgreSQLWorkStateStore(database)
+    packet = WorkTaskPacket("packet:62:2", record().identity, 2, "IMPLEMENT", "STARTED")
+    effect = EffectAttempt(
+        "effect:62:2", record().identity, "PUSH", "branch:feature/v2", "INTENT_RECORDED"
+    )
+    checkpoint = WorkCheckpoint(
+        "checkpoint:62:3",
+        record().identity,
+        "run:3",
+        "EFFECT_PENDING",
+        "EFFECT_INTENT_RECORDED",
+        "外部効果を実行する",
+        task_packet_identity=packet.identity,
+    )
+
+    assert not store.issue_packet_transaction(
+        record=record(),
+        lease=WorkLease(record().identity, "run:3", 2, 300),
+        packet=packet,
+        effect=effect,
+        checkpoint=checkpoint,
+    )
+    assert len(database.statements) == 1
+    assert "FROM acquired" in database.statements[0]
+
+
+def test_failed_transaction_leaves_no_partial_packet_state() -> None:
+    database = Database(transaction_result=None)
+    store = PostgreSQLWorkStateStore(database)
+    packet = WorkTaskPacket("packet:62:2", record().identity, 2, "IMPLEMENT", "STARTED")
+    effect = EffectAttempt(
+        "effect:62:2", record().identity, "PUSH", "branch:feature/v2", "INTENT_RECORDED"
+    )
+    checkpoint = WorkCheckpoint(
+        "checkpoint:62:3",
+        record().identity,
+        "run:3",
+        "EFFECT_PENDING",
+        "EFFECT_INTENT_RECORDED",
+        "外部効果を実行する",
+        task_packet_identity=packet.identity,
+    )
+
+    with pytest.raises(WorkStateUnavailable, match="WORK_STATE_TRANSACTION_FAILED"):
+        store.issue_packet_transaction(
+            record=record(),
+            lease=WorkLease(record().identity, "run:3", 2, 300),
+            packet=packet,
+            effect=effect,
+            checkpoint=checkpoint,
+        )
+    assert len(database.statements) == 1
