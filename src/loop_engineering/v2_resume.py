@@ -11,7 +11,9 @@ from .work_state import EffectAttempt, RecoveredWork, WorkRecord
 
 class V2ResumeStatus(str, Enum):
     READY = "READY"
+    COMPLETED = "COMPLETED"
     RECONCILE_REQUIRED = "RECONCILE_REQUIRED"
+    WAITING = "WAITING"
     BLOCKED = "BLOCKED"
 
 
@@ -28,6 +30,20 @@ class V2ResumeResult:
     recovered: RecoveredWork | None = None
 
 
+class WorkDefinitionStatus(str, Enum):
+    READY = "READY"
+    COMPLETED = "COMPLETED"
+    UNAVAILABLE = "UNAVAILABLE"
+    CLOSED_BEFORE_COMPLETION = "CLOSED_BEFORE_COMPLETION"
+    DEPENDENCY_PENDING = "DEPENDENCY_PENDING"
+
+
+@dataclass(frozen=True, slots=True)
+class WorkDefinitionResult:
+    status: WorkDefinitionStatus
+    record: WorkRecord | None = None
+
+
 class WorkRecoveryPort(Protocol):
     def recover(self, work_identity: str) -> RecoveredWork | None: ...
 
@@ -39,7 +55,7 @@ class WorkRecoveryPort(Protocol):
 class WorkDefinitionPort(Protocol):
     """IssueとProjectから作業定義だけを同期する。"""
 
-    def synchronize(self, record: WorkRecord) -> WorkRecord | None: ...
+    def synchronize(self, record: WorkRecord) -> WorkDefinitionResult: ...
 
 
 class EffectReadbackPort(Protocol):
@@ -66,8 +82,16 @@ class V2ResumeCoordinator:
         if recovered is None or not _complete_recovery(recovered):
             return V2ResumeResult(V2ResumeStatus.BLOCKED, "WORK_RECOVERY_MISSING", recovered)
 
-        synchronized = self._definitions.synchronize(recovered.record)
-        if synchronized is None:
+        definition = self._definitions.synchronize(recovered.record)
+        if definition.status is WorkDefinitionStatus.DEPENDENCY_PENDING:
+            return V2ResumeResult(V2ResumeStatus.WAITING, "DEPENDENCY_PENDING", recovered)
+        if definition.status is WorkDefinitionStatus.CLOSED_BEFORE_COMPLETION:
+            return V2ResumeResult(
+                V2ResumeStatus.BLOCKED, "WORK_CLOSED_BEFORE_COMPLETION", recovered
+            )
+        synchronized = definition.record
+        accepted_statuses = {WorkDefinitionStatus.READY, WorkDefinitionStatus.COMPLETED}
+        if definition.status not in accepted_statuses or synchronized is None:
             return V2ResumeResult(
                 V2ResumeStatus.BLOCKED,
                 "WORK_DEFINITION_UNAVAILABLE",
@@ -95,6 +119,9 @@ class V2ResumeCoordinator:
                 recovered,
             )
 
+        if definition.status is WorkDefinitionStatus.COMPLETED:
+            return V2ResumeResult(V2ResumeStatus.COMPLETED, "WORK_COMPLETED", recovered)
+
         return V2ResumeResult(V2ResumeStatus.READY, "RESUME_READY", recovered)
 
 
@@ -118,4 +145,5 @@ def _same_work(before: WorkRecord, after: WorkRecord) -> bool:
         before.identity == after.identity
         and before.repository == after.repository
         and before.issue_number == after.issue_number
+        and before.issue_revision == after.issue_revision
     )
