@@ -4,6 +4,8 @@
 
 この表は#462配下のLoop Engineering実装で参照する設計上の正本である。開発制御系の`tools/loop_engine/`と、AI Liver製品実行系の`app/`を意図的に分離する。
 
+Issue #62のV2作業状態DB移行では、`work_state_and_issue_boundary.md`、`work_recovery_algorithm.md`、`v2_adapters_cutover_and_acceptance.md`を優先する。旧actual-host方式と自然文Checkpoint解析を前提にした記述はV2へ適用しない。
+
 | 領域 | 正本文書 | 所有Work | 完了契約 |
 | --- | --- | --- | --- |
 | A: 環境 | `docs/operations/loop_environment_preflight.md` | #463 / #469 | 利用能力確認とホスト起動は製品に依存しない |

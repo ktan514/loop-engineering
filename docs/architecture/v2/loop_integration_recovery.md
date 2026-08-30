@@ -9,8 +9,8 @@
 | CI | 厳密HEADに対するGitHub Actions証拠 |
 | ProjectのStatus / Priority / Area / Issue level / Start / Target | Project #7の現在値 |
 | 正本設計 | Repository正本文書のblob identity |
-| Work Checkpoint | 遷移、`TaskPacket`、健全性、永続的な経緯 |
-| Mission Checkpoint | 現在Workの経緯と次作業 |
+| DB作業Checkpoint | 遷移、作業パケット、健全性、永続的な経緯と再開地点 |
+| Issueの状況報告 | 現在Workの経緯と次作業を人間へ展開する出力 |
 
 Checkpointの値でProject #7が所有する項目を上書きしない。現在の正本と矛盾した場合は現在状態から修復するか、安全側停止（fail-closed）する。
 
@@ -22,13 +22,13 @@ Checkpointの値でProject #7が所有する項目を上書きしない。現在
 
 ## 実ホストでの対象解決
 
-通常のLoop CLIは、#450の**最新**`Mission Checkpoint`コメントだけを探索記録として使用し、古い解析可能なCheckpointへ遡らない。変更可能なCheckpointは最低でも`current Work`を明示し、PRが存在する場合は`current PR`と観測した厳密HEADも記録する。
+通常のLoop CLIは、DBの最新安全Checkpointと作業パケットを復元する。Issue commentを探索して`current Work`、PR、HEAD、次遷移を組み立てない。
 
-Checkpointの対象情報自体は実行上の正本ではない。解析後、CI判定、Codex起動、Ready化、統合、Issue終了、Checkpoint投稿の前に、Work IssueとPR/branch HEADをGitHubから再取得する。CheckpointのHEADと現在PRのHEADが異なる場合は古い情報として扱い、再調整が完了するまで変更しない。
+DBのCheckpointは実行再開の正本だが、外部効果の成否を単独で決めない。CI判定、Codex起動、Ready化、統合、Issue終了の前に、DBが記録したWork IssueとPR/branch HEADをGitHubから必要最小限で再取得する。記録したHEADと現在PRのHEADが異なる場合は古い情報として扱い、再調整が完了するまで変更しない。
 
-最新Mission Checkpointに明示的な現在対象がない、対象識別情報が不正、またはGitHubの現在状態と再調整できない場合、ホストは型付きの安全側停止結果を返す。過去の完了済みWorkを再実行する危険があるため、古いMission Checkpointへ暗黙に戻ってはならない。
+DBに安全Checkpointがない、対象識別情報が不正、または未確定effectを再調整できない場合、ホストは型付きの安全側停止結果を返す。過去のIssue報告へ暗黙に戻ってはならない。
 
-次Workを選択する計画専用Codexは、次回ホスト実行が必要とする`current Work`、PR、HEADの識別情報を明示した新しいMission Checkpointを必ず作成する。
+次Workを選択する計画処理は、次回ホスト実行に必要な`current Work`、PR、HEAD、次遷移をDBの作業パケットと安全Checkpointへ確定する。Issueには確定後の状況報告だけを投稿する。
 
 ## 統合競合の再調整
 

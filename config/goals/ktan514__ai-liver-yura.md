@@ -5,7 +5,7 @@ generation: 1
 
 ## Mission
 
-Root #317をMission #450の管理下で完成まで進める。現在状態の正本はGitHub liveのIssue、PR、branch、厳密HEAD、CI、Project #7とする。固定PR番号や固定HEADをGoal本文へ埋め込まず、最新Mission Checkpointとfresh readbackから現在対象を解決する。
+Root #317をMission #450の管理下で完成まで進める。IssueとProject #7は課題・作業の統括を、PostgreSQLは停止後に復元する実行作業状態を所有する。PR、branch、厳密HEAD、CIは対象外部効果の正本とし、DB復元後に必要な対象だけを再照合する。固定PR番号や固定HEADをGoal本文へ埋め込まない。
 
 ## Authorityと安全境界
 
@@ -19,7 +19,7 @@ Root #317をMission #450の管理下で完成まで進める。現在状態の�
 
 ## 再開判定
 
-branch作成、実装、push、merge、新規PR作成の前にGitHub live、最新Mission/Work Checkpoint、現在trunk、canonical design、active lineage、CI/review状態をfresh確認する。
+branch作成、実装、push、merge、新規PR作成の前にDBの安全Checkpointと作業パケットを復元し、Issue / Projectの作業定義、現在trunk、正本設計、作業系列、対象CI/review状態を必要な範囲で再照合する。Issue commentを再開入力にしない。
 
 競合lineage、不明なSHA更新、Authority不一致がある場合は再調整してから進む。会話記憶だけで現在対象を確定しない。
 
@@ -39,7 +39,7 @@ branch作成、実装、push、merge、新規PR作成の前にGitHub live、最�
 
 ## Operational State
 
-PostgreSQLはLoop EngineeringのRun、transition、checkpoint、blocker、lease、重複実行防止等のOperational Stateに使用する。GitHub current-state AuthorityやMission GoalをDBの過去状態で上書きしない。
+PostgreSQLはLoop EngineeringのRun、transition、作業パケット、Checkpoint、blocker、lease、重複実行防止等の実行作業状態に使用する。停止後の再開はDBを起点にする。Issueの目的、受入条件、依存関係、完了判断をDBの状態で上書きしない。
 
 ## Mission状態
 

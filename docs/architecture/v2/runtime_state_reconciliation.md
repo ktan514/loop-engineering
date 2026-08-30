@@ -1,6 +1,7 @@
 # Runtime Operational State / Restart Reconciliation
 
-管理Issue: #44
+管理Issue: #62
+旧管理Issue: #44
 関連: #27 / #46
 状態: canonical architecture
 
@@ -8,7 +9,7 @@
 
 PostgreSQL Operational Storeを、Loop EngineeringのHost run、遷移履歴、実行排他、再起動復旧、重複副作用防止のために使用する。
 
-この文書はGitHub current-state Authorityを変更しない。Issue、PR、Project、branch、exact HEAD、CI、review、Mission Checkpointの現在状態はfresh GitHub readを正とする。PostgreSQLは過去の運用効果と未確定状態を保持するだけで、DBだけからcurrent Workやmerge可否を決定しない。
+この文書は`work_state_and_issue_boundary.md`に従う。DBは再開対象の作業、作業パケット、Checkpoint、未確定effectを復元する正本である。Issueは課題と作業の統括を所有し、Issue commentは人間向け報告であって再開入力ではない。PR、branch、exact HEAD、CI、reviewの実効果は、DBが記録した対象identityを用いて必要時だけ再照合する。
 
 ## 2. 1 Host遷移の永続境界
 
@@ -16,11 +17,11 @@ PostgreSQL Operational Storeを、Loop EngineeringのHost run、遷移履歴、�
 
 開始順序:
 
-1. 前回の未完了runをPostgreSQLからreadbackする。
-2. GitHubからcurrent targetをfresh readする。
-3. 前回未完了runがある場合は、そのrunが記録した観測Checkpointとfresh targetを比較してreconcileする。
+1. 前回の未完了runと作業の安全CheckpointをPostgreSQLからreadbackする。
+2. Issue / Projectから作業定義の変更だけを同期する。
+3. 前回未完了runがある場合は、DBのeffect状態に対応する外部対象だけを再照合してreconcileする。
 4. 現在runの`run_id`を生成し`loop_runs`へ`RUNNING`として記録する。
-5. current targetの最小snapshotを`loop_checkpoints`へ記録する。
+5. 復元した作業パケットと外部対象identityを`loop_checkpoints`へ記録する。
 6. project単位execution leaseを取得する。
 7. Host controllerを1遷移だけ実行する。
 8. 結果を`loop_transitions`へ記録し、必要に応じてblocker / external waitを更新する。
@@ -32,24 +33,23 @@ PostgreSQL Operational Storeを、Loop EngineeringのHost run、遷移履歴、�
 
 前回runが`RUNNING`のまま残っている場合、Loop Engineeringは副作用が発生しなかったと推定しない。
 
-前回runに記録されたCheckpoint snapshotとfresh GitHub targetを比較する。
+前回runに記録された作業Checkpointと、そのCheckpointが指す外部effectだけを比較する。
 
 ### 3.1 GitHub側が前進している場合
 
 次のいずれかが変化していれば、DB上の前回状態はstale operational stateとしてreconcileできる。
 
-- Mission Checkpoint comment identity
 - current Work
 - current PR
 - exact HEAD
 
-fresh GitHub stateを採用し、前回runを`RECONCILED`として閉じ、古いleaseを解放して現在runを継続する。
+確認済みの外部効果をDBへ確定し、前回runを`RECONCILED`として閉じ、古いleaseを解放して現在runを継続する。
 
 ### 3.2 同一Checkpointのままの場合
 
-前回runが`RUNNING`で、fresh GitHub targetが前回snapshotと同一である場合、副作用の成否は確定できない。
+前回runが`RUNNING`で、DB上の`EFFECT_PENDING`に対応する外部効果を確認できない場合、副作用の成否は確定できない。
 
-この場合はCodex実行、GitHub write、merge等を再送しない。`OPERATIONAL_STATE_UNCERTAIN`として型付きInterventionへ遷移し、blockerを永続化する。
+この場合はCodex実行、GitHub write、merge等を再送しない。`OPERATIONAL_STATE_UNCERTAIN`として型付き待機またはblockerへ遷移し、DBへ永続化する。
 
 前回runに観測Checkpoint自体が無い場合も同様に未確定として扱う。
 

@@ -4,11 +4,14 @@
 
 ## Authority
 
-- 現在状態: GitHub live Issue / PR / branch / commit SHA / Actions
-- 作業再開: 対象Issueの最新Resume Checkpoint
+- 課題と作業の統括: GitHub Issue / Project
+- 作業再開: PostgreSQLの作業記録と最後の安全Checkpoint
+- 外部効果の確認: GitHubのPR / branch / commit SHA / Actions
 - 計画: GitHub Project `loop-engineering` のlive field
 - 設計: Repository正本文書
 - 会話記憶・summary: 候補発見のみ
+
+Issue commentは人間向けの状況報告であり、再開対象の機械入力に使わない。詳細は`docs/architecture/v2/work_state_and_issue_boundary.md`を参照する。
 
 ## 必須原則
 
