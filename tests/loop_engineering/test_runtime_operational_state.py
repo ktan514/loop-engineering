@@ -160,7 +160,12 @@ def test_same_checkpoint_unfinished_run_blocks_duplicate_side_effect() -> None:
         None,
     )
     mission = FakeMission(observed)
-    controller = FakeController(HostTransitionResult(HostTransitionStatus.COMPLETED, "SHOULD_NOT_RUN"))
+    controller = FakeController(
+        HostTransitionResult(
+            HostTransitionStatus.COMPLETED,
+            "SHOULD_NOT_RUN",
+        )
+    )
     store = FakeStore(previous=previous)
 
     actual = coordinator(mission, controller, store).run_once()
@@ -182,7 +187,13 @@ def test_advanced_github_checkpoint_reconciles_old_run_then_continues() -> None:
         None,
     )
     observed = target(checkpoint=124, head="b" * 40)
-    result = HostTransitionResult(HostTransitionStatus.YIELD_EXTERNAL, "CI_PENDING", 339, 500, "b" * 40)
+    result = HostTransitionResult(
+        HostTransitionStatus.YIELD_EXTERNAL,
+        "CI_PENDING",
+        339,
+        500,
+        "b" * 40,
+    )
     mission = FakeMission(observed)
     controller = FakeController(result)
     store = FakeStore(previous=previous)
@@ -205,7 +216,13 @@ def test_terminal_transition_on_unfinished_run_is_closed_without_duplicate() -> 
         "a" * 40,
         "YIELD_EXTERNAL",
     )
-    result = HostTransitionResult(HostTransitionStatus.YIELD_EXTERNAL, "CI_PENDING", 339, 500, "a" * 40)
+    result = HostTransitionResult(
+        HostTransitionStatus.YIELD_EXTERNAL,
+        "CI_PENDING",
+        339,
+        500,
+        "a" * 40,
+    )
     mission = FakeMission(target(checkpoint=123, head="a" * 40))
     controller = FakeController(result)
     store = FakeStore(previous=previous)
@@ -220,7 +237,12 @@ def test_terminal_transition_on_unfinished_run_is_closed_without_duplicate() -> 
 
 def test_required_store_read_failure_fails_closed_before_controller() -> None:
     mission = FakeMission(target())
-    controller = FakeController(HostTransitionResult(HostTransitionStatus.COMPLETED, "SHOULD_NOT_RUN"))
+    controller = FakeController(
+        HostTransitionResult(
+            HostTransitionStatus.COMPLETED,
+            "SHOULD_NOT_RUN",
+        )
+    )
     store = FakeStore(fail_on_latest=True)
 
     actual = coordinator(mission, controller, store).run_once()
