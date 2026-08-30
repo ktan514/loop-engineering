@@ -149,9 +149,9 @@ def test_finalize_commits_pushes_and_publishes_checkpoint_in_japanese() -> None:
     new_head = "d" * 40
     runner = ScriptedRunner(
         {
-            ("git", "diff", "--name-only", "--diff-filter=U"): LocalCommandResult(0, ""),
-            ("git", "diff", "--check"): LocalCommandResult(0, ""),
             ("git", "add", "-A"): LocalCommandResult(0, ""),
+            ("git", "ls-files", "-u"): LocalCommandResult(0, ""),
+            ("git", "diff", "--cached", "--check"): LocalCommandResult(0, ""),
             ("git", "diff", "--cached", "--quiet"): LocalCommandResult(1, ""),
             ("git", "commit", "-m", "#340 の実装を進める"): LocalCommandResult(0, ""),
             ("git", "rev-parse", "HEAD"): LocalCommandResult(0, new_head + "\n"),
