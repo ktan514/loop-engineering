@@ -116,7 +116,8 @@ class PostgreSQLRuntimeOperationalStore:
     def begin_run(self, run_identity: str, project_key: str, repository: str) -> None:
         self._execute(
             "INSERT INTO loop_runs (identity, project_key, repository, status) VALUES ("
-            f"{_literal(run_identity)}, {_literal(project_key)}, {_literal(repository)}, 'RUNNING') "
+            f"{_literal(run_identity)}, {_literal(project_key)}, "
+            f"{_literal(repository)}, 'RUNNING') "
             "ON CONFLICT (identity) DO NOTHING"
         )
 
@@ -145,7 +146,8 @@ class PostgreSQLRuntimeOperationalStore:
         head_sha = target.head_sha if target is not None else None
         self._execute(
             "INSERT INTO loop_checkpoints "
-            "(identity, run_identity, project_key, work_issue, source_revision, pr_number, head_sha) "
+            "(identity, run_identity, project_key, work_issue, "
+            "source_revision, pr_number, head_sha) "
             "VALUES ("
             f"{_literal(identity)}, {_literal(run_identity)}, {_literal(project_key)}, "
             f"{_nullable_int(work_issue)}, {_nullable_literal(revision)}, "
@@ -166,7 +168,8 @@ class PostgreSQLRuntimeOperationalStore:
         identity = f"transition:{run_identity}:{sequence_number}"
         self._execute(
             "INSERT INTO loop_transitions "
-            "(identity, run_identity, sequence_number, status, detail, work_issue, pr_number, head_sha) "
+            "(identity, run_identity, sequence_number, status, detail, "
+            "work_issue, pr_number, head_sha) "
             "VALUES ("
             f"{_literal(identity)}, {_literal(run_identity)}, {sequence_number}, "
             f"{_literal(result.status.value)}, {_literal(result.detail)}, "
