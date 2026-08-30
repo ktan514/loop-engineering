@@ -39,6 +39,15 @@ _CURRENT_PR_RE = re.compile(
 _EXACT_HEAD_RE = re.compile(
     r"(?im)^.*?(?:exact\s+HEAD|HEAD)\s*:\s*`?([0-9a-f]{40})"
 )
+_COMPLETED_WORK_RE = re.compile(
+    r"(?im)^.*?(?:completed\s+Work|完了(?:済み)?Work)\s*:\s*`?#?(\d+)"
+)
+_MERGED_PR_RE = re.compile(r"(?im)^.*?(?:merged\s+PR|統合済みPR)\s*:\s*`?#?(\d+)")
+_ACTIVE_MISSION_RE = re.compile(r"(?im)^.*?Mission\s+state\s*:\s*`?ACTIVE`?")
+_NEXT_WORK_SELECTION_RE = re.compile(
+    r"(?im)^.*?(?:next\s+action|次(?:の)?action|次の作業)(?:\s*(?:は|:))?\s*"
+    r".*?(?:next\s+.*?Work|次.*?Work).*?(?:select|選択)"
+)
 
 
 class StrictGhMissionPort(GhMissionPort):
@@ -69,6 +78,8 @@ class StrictGhMissionPort(GhMissionPort):
             raise RuntimeError("MISSION_CHECKPOINT_TARGET_UNRESOLVED")
         work_match = _CURRENT_WORK_RE.search(body_value)
         if work_match is None:
+            if self._is_explicit_planning_boundary(body_value):
+                return None
             raise RuntimeError("MISSION_CHECKPOINT_TARGET_UNRESOLVED")
 
         pr_match = _CURRENT_PR_RE.search(body_value)
@@ -81,6 +92,15 @@ class StrictGhMissionPort(GhMissionPort):
             int(pr_match.group(1)) if pr_match else None,
             head_match.group(1) if head_match else None,
             comment_id,
+        )
+
+    @staticmethod
+    def _is_explicit_planning_boundary(body: str) -> bool:
+        return bool(
+            _ACTIVE_MISSION_RE.search(body)
+            and _COMPLETED_WORK_RE.search(body)
+            and _MERGED_PR_RE.search(body)
+            and _NEXT_WORK_SELECTION_RE.search(body)
         )
 
     def merge_current(self, target: HostTarget) -> bool:

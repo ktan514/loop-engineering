@@ -123,6 +123,19 @@ class NoopImplementer:
         return False
 
 
+class PlanningImplementer:
+    def __init__(self) -> None:
+        self.plan_calls: list[int | None] = []
+
+    def continue_work(self, target: HostTarget, *, repair: bool) -> bool:
+        del target, repair
+        return False
+
+    def plan_next_work(self, completed_work: int | None) -> bool:
+        self.plan_calls.append(completed_work)
+        return True
+
+
 class MutablePilotImplementer(PilotPlanningImplementer):
     def __init__(
         self,
@@ -150,7 +163,68 @@ class MutablePilotImplementer(PilotPlanningImplementer):
         return True
 
 
-def test_latest_ambiguous_mission_checkpoint_does_not_fall_back() -> None:
+def test_completion_checkpoint_without_current_work_dispatches_planning() -> None:
+    responses = {
+        "repos/ktan514/ai-liver-yura/issues/450/comments?per_page=100&page=1": [
+            {
+                "id": 1,
+                "body": (
+                    "## Mission Checkpoint — ACTIVE / 実装更新\n\n"
+                    "- current Work: #465\n"
+                    "- current PR: #466\n"
+                    f"- exact HEAD: `{'1' * 40}`"
+                ),
+            },
+            {
+                "id": 2,
+                "body": (
+                    "## Mission Checkpoint — 完了 / 次Work選択\n\n"
+                    "- Mission state: `ACTIVE`\n"
+                    "- completed Work: #494\n"
+                    "- merged PR: #496\n"
+                    "- current PR: なし\n"
+                    "次のactionはProjectとGitHub liveから次の依存関係を満たしたWorkを"
+                    "fresh readして選択すること"
+                ),
+            },
+        ]
+    }
+    mission = StrictGhMissionPort(config(), FakeLocalRunner(responses), {"PATH": "/usr/bin"})
+    implementer = PlanningImplementer()
+
+    result = HostLoopController(config(), mission, implementer).run_once()
+
+    assert result.status is HostTransitionStatus.COMPLETED
+    assert result.detail == "PLANNING_DISPATCHED"
+    assert result.work_issue is None
+    assert implementer.plan_calls == [None]
+
+
+def test_completion_checkpoint_does_not_fall_back_to_old_current_work() -> None:
+    responses = {
+        "repos/ktan514/ai-liver-yura/issues/450/comments?per_page=100&page=1": [
+            {
+                "id": 1,
+                "body": "## Mission Checkpoint\n\n- current Work: #465",
+            },
+            {
+                "id": 2,
+                "body": (
+                    "## Mission Checkpoint\n\n"
+                    "- Mission state: `ACTIVE`\n"
+                    "- completed Work: #494\n"
+                    "- merged PR: #496\n"
+                    "次のactionはGitHub liveから次の依存関係を満たしたWorkを選択すること"
+                ),
+            },
+        ]
+    }
+    port = StrictGhMissionPort(config(), FakeLocalRunner(responses), {"PATH": "/usr/bin"})
+
+    assert port.current_target() is None
+
+
+def test_ambiguous_latest_checkpoint_does_not_fall_back_to_old_work() -> None:
     responses = {
         "repos/ktan514/ai-liver-yura/issues/450/comments?per_page=100&page=1": [
             {
@@ -166,6 +240,26 @@ def test_latest_ambiguous_mission_checkpoint_does_not_fall_back() -> None:
                 "id": 2,
                 "body": "## Mission Checkpoint\n\n現在対象を明示していない状態記録",
             },
+        ]
+    }
+    port = StrictGhMissionPort(config(), FakeLocalRunner(responses), {"PATH": "/usr/bin"})
+
+    with pytest.raises(RuntimeError, match="MISSION_CHECKPOINT_TARGET_UNRESOLVED"):
+        port.current_target()
+
+
+def test_malformed_latest_checkpoint_fails_closed() -> None:
+    responses = {
+        "repos/ktan514/ai-liver-yura/issues/450/comments?per_page=100&page=1": [
+            {
+                "id": 2,
+                "body": (
+                    "## Mission Checkpoint\n\n"
+                    "- Mission state: `ACTIVE`\n"
+                    "- completed Work: #494\n"
+                    "- next action: Projectから次Workをfresh選択する"
+                ),
+            }
         ]
     }
     port = StrictGhMissionPort(config(), FakeLocalRunner(responses), {"PATH": "/usr/bin"})
