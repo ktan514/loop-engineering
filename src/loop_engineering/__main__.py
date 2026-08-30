@@ -84,16 +84,17 @@ def main() -> int:
         from .postgres_runtime import PostgreSQLCommandAdapter
         from .preflight import SubprocessCommandRunner
 
-        result = PostgreSQLCommandAdapter(
+        migration_result = PostgreSQLCommandAdapter(
             SubprocessCommandRunner(),
             environment,
         ).apply_migrations()
-        applied = ",".join(result.applied) if result.applied else "なし"
+        applied = ",".join(migration_result.applied) if migration_result.applied else "なし"
         print(
-            f"OPERATIONAL_STORE_MIGRATION={'PASS' if result.succeeded else 'FAIL'} "
-            f"detail={result.detail} applied={applied}"
+            "OPERATIONAL_STORE_MIGRATION="
+            f"{'PASS' if migration_result.succeeded else 'FAIL'} "
+            f"detail={migration_result.detail} applied={applied}"
         )
-        return 0 if result.succeeded else 3
+        return 0 if migration_result.succeeded else 3
 
     if arguments.preflight:
         from .preflight import (
@@ -102,15 +103,15 @@ def main() -> int:
             SubprocessCommandRunner,
         )
 
-        result = EnvironmentCapabilityPreflight(
+        preflight_result = EnvironmentCapabilityPreflight(
             settings.engine,
             SubprocessCommandRunner(),
             environment,
             project_root=workspace_root,
         ).run()
         print(f"MISSION_GOAL_PATH = {environment.get('LOOP_MISSION_GOAL_PATH', '')}")
-        print(result.as_json())
-        return 3 if result.status is PreflightStatus.BLOCKED else 0
+        print(preflight_result.as_json())
+        return 3 if preflight_result.status is PreflightStatus.BLOCKED else 0
 
     from .host_entrypoint import run_actual_host_transition
 
@@ -133,7 +134,7 @@ def main() -> int:
         while True:
             transition_number += 1
             console.event(f"遷移 {transition_number}: 開始")
-            result = run_actual_host_transition(
+            transition_result = run_actual_host_transition(
                 root=workspace_root,
                 environment=environment,
                 local_runner=runner,
@@ -141,19 +142,19 @@ def main() -> int:
             )
             console.event(
                 f"遷移 {transition_number}: "
-                f"{result.status.value} 詳細={result.detail}"
+                f"{transition_result.status.value} 詳細={transition_result.detail}"
             )
 
             if arguments.once:
-                print(result.as_json())
-                return _exit_code(result)
+                print(transition_result.as_json())
+                return _exit_code(transition_result)
 
-            if result.status is HostTransitionStatus.COMPLETED:
+            if transition_result.status is HostTransitionStatus.COMPLETED:
                 completed_key = (
-                    result.detail,
-                    result.work_issue,
-                    result.pr_number,
-                    result.head_sha,
+                    transition_result.detail,
+                    transition_result.work_issue,
+                    transition_result.pr_number,
+                    transition_result.head_sha,
                 )
                 if completed_key == previous_completed:
                     identical_completed += 1
@@ -164,9 +165,9 @@ def main() -> int:
                     blocked = HostTransitionResult(
                         HostTransitionStatus.INTERVENTION_REQUIRED,
                         "NO_PROGRESS_GUARD",
-                        result.work_issue,
-                        result.pr_number,
-                        result.head_sha,
+                        transition_result.work_issue,
+                        transition_result.pr_number,
+                        transition_result.head_sha,
                     )
                     console.event("進捗停止検知: 同一の完了遷移が繰り返されました")
                     print(blocked.as_json())
@@ -179,8 +180,8 @@ def main() -> int:
             identical_completed = 0
 
             if (
-                result.status is HostTransitionStatus.YIELD_EXTERNAL
-                and result.detail == "CI_PENDING"
+                transition_result.status is HostTransitionStatus.YIELD_EXTERNAL
+                and transition_result.detail == "CI_PENDING"
             ):
                 console.event(
                     f"CI待機: {int(ci_wait_seconds)}秒後に自動再開します"
@@ -192,8 +193,8 @@ def main() -> int:
                 )
                 continue
 
-            print(result.as_json())
-            return _exit_code(result)
+            print(transition_result.as_json())
+            return _exit_code(transition_result)
     except KeyboardInterrupt:
         console.event("操作者の要求により停止します")
         return 130
