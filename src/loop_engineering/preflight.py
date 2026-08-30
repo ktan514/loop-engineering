@@ -28,6 +28,7 @@ class PreflightStatus(str, Enum):
 class CommandResult:
     succeeded: bool
     output: str = ""
+    error: str = ""
     timed_out: bool = False
 
 
@@ -55,7 +56,7 @@ class SubprocessCommandRunner:
                 check=False,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 text=True,
                 env=dict(environment) if environment is not None else None,
                 timeout=self._TIMEOUT_SECONDS,
@@ -64,7 +65,11 @@ class SubprocessCommandRunner:
             return CommandResult(False, timed_out=True)
         except OSError:
             return CommandResult(False)
-        return CommandResult(result.returncode == 0, result.stdout)
+        return CommandResult(
+            result.returncode == 0,
+            result.stdout,
+            result.stderr,
+        )
 
 
 class TrustedReviewerBrokerProbe(Protocol):
@@ -124,12 +129,15 @@ class EnvironmentCapabilityPreflight:
         self._reviewer_probe = reviewer_probe or UnixSocketTrustedReviewerBrokerProbe()
         self._project_root = (project_root or Path.cwd()).resolve(strict=False)
         self._timeouts: list[str] = []
+        self._github_project_rate_limited = False
 
     def run(self) -> PreflightResult:
         capability = self._command_capabilities()
         capability.update(self._workspace_capabilities())
         capability["github_repo_write"] = self._repository_write_allowed()
-        capability["github_project_write"] = self._project_write_allowed()
+        project_read, project_write = self._project_access()
+        capability["github_project_read"] = project_read
+        capability["github_project_write"] = project_write
         capability["mission_goal"] = self._mission_goal_matches()
         capability["project_venv"] = sys.prefix != sys.base_prefix
         capability["trusted_reviewer"] = self._reviewer_available()
@@ -185,37 +193,23 @@ class EnvironmentCapabilityPreflight:
             if scoped
             else PreflightStatus.PASS
         )
+        rate_limit_diagnostic = (
+            ("GITHUB_PROJECT_RATE_LIMITED",)
+            if self._github_project_rate_limited
+            else ()
+        )
         return PreflightResult(
             status,
             capability,
             blocking,
             scoped,
-            blocking + scoped + tuple(self._timeouts),
+            blocking + scoped + tuple(self._timeouts) + rate_limit_diagnostic,
         )
 
     def _command_capabilities(self) -> dict[str, bool]:
-        project = str(self._config.project_number)
-        owner = self._config.owner
         probes = {
             "github_cli": ("gh", "auth", "status"),
             "github_repo_read": ("gh", "repo", "view", self._config.repository),
-            "github_project_view": ("gh", "project", "view", project, "--owner", owner),
-            "github_project_fields": (
-                "gh",
-                "project",
-                "field-list",
-                project,
-                "--owner",
-                owner,
-            ),
-            "github_project_items": (
-                "gh",
-                "project",
-                "item-list",
-                project,
-                "--owner",
-                owner,
-            ),
             "python": (sys.executable, "--version"),
             "pytest": (sys.executable, "-m", "pytest", "--version"),
             "ruff": (sys.executable, "-m", "ruff", "--version"),
@@ -224,18 +218,9 @@ class EnvironmentCapabilityPreflight:
             "codex_cli": ("codex", "--version"),
             "docker": ("docker", "version"),
         }
-        capability = {
+        return {
             name: self._run(name, command).succeeded for name, command in probes.items()
         }
-        capability["github_project_read"] = all(
-            capability.pop(name)
-            for name in (
-                "github_project_view",
-                "github_project_fields",
-                "github_project_items",
-            )
-        )
-        return capability
 
     def _workspace_capabilities(self) -> dict[str, bool]:
         root = self._project_root
@@ -283,24 +268,29 @@ class EnvironmentCapabilityPreflight:
         except (KeyError, TypeError, json.JSONDecodeError):
             return False
 
-    def _project_write_allowed(self) -> bool:
+    def _project_access(self) -> tuple[bool, bool]:
         query = (
             "query { user(login: "
             f'"{self._config.owner}"'
             ") { projectV2(number: "
             f"{self._config.project_number}"
-            ") { viewerCanUpdate } } }"
+            ") { id viewerCanUpdate } } }"
         )
         result = self._run(
-            "github_project_write",
+            "github_project_access",
             ("gh", "api", "graphql", "-f", f"query={query}"),
         )
+        if not result.succeeded:
+            if _is_github_rate_limit(result):
+                self._github_project_rate_limited = True
+            return False, False
         try:
-            return result.succeeded and bool(
-                json.loads(result.output)["data"]["user"]["projectV2"]["viewerCanUpdate"]
-            )
+            project = json.loads(result.output)["data"]["user"]["projectV2"]
         except (KeyError, TypeError, json.JSONDecodeError):
-            return False
+            return False, False
+        if not isinstance(project, dict) or not isinstance(project.get("id"), str):
+            return False, False
+        return True, project.get("viewerCanUpdate") is True
 
     def _reviewer_available(self) -> bool:
         socket_path = self._environment.get("LOOP_TRUSTED_REVIEWER_SOCKET")
@@ -347,6 +337,14 @@ class EnvironmentCapabilityPreflight:
         if result.timed_out:
             self._timeouts.append(f"{name.upper()}_TIMEOUT")
         return result
+
+
+def _is_github_rate_limit(result: CommandResult) -> bool:
+    diagnostic = f"{result.output}\n{result.error}".lower()
+    return (
+        "api rate limit exceeded" in diagnostic
+        or "secondary rate limit" in diagnostic
+    )
 
 
 def _repository_from_remote(value: str) -> str | None:
