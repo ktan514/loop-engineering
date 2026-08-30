@@ -55,6 +55,7 @@ class FakeStore:
     transitions: list[HostTransitionResult] = field(default_factory=list)
     acquired: list[str] = field(default_factory=list)
     released: list[str] = field(default_factory=list)
+    resolved: list[tuple[str, str, str]] = field(default_factory=list)
     blockers: list[HostTransitionResult] = field(default_factory=list)
     waits: list[HostTransitionResult] = field(default_factory=list)
 
@@ -101,6 +102,14 @@ class FakeStore:
         del project_key
         self.released.append(run_identity)
 
+    def resolve_open_states(
+        self,
+        project_key: str,
+        repository: str,
+        current_run_identity: str,
+    ) -> None:
+        self.resolved.append((project_key, repository, current_run_identity))
+
     def record_blocker(self, run_identity: str, result: HostTransitionResult) -> None:
         del run_identity
         self.blockers.append(result)
@@ -145,6 +154,9 @@ def test_completed_transition_is_durably_recorded_and_lease_released() -> None:
     assert len(store.begun) == 1
     assert store.checkpoints[0][1] == observed
     assert store.transitions == [result]
+    assert store.resolved == [
+        ("ai-liver-yura", "ktan514/ai-liver-yura", store.begun[0])
+    ]
     assert store.finished[0][1] == "COMPLETED"
     assert store.released == store.acquired
 
@@ -174,6 +186,7 @@ def test_same_checkpoint_unfinished_run_blocks_duplicate_side_effect() -> None:
     assert actual.detail == "OPERATIONAL_STATE_UNCERTAIN"
     assert controller.calls == 0
     assert store.begun == []
+    assert store.resolved == []
     assert store.blockers[-1].detail == "OPERATIONAL_STATE_UNCERTAIN"
 
 
@@ -204,6 +217,7 @@ def test_advanced_github_checkpoint_reconciles_old_run_then_continues() -> None:
     assert store.reconciled == ["old-run"]
     assert "old-run" in store.released
     assert controller.calls == 1
+    assert len(store.resolved) == 1
     assert store.waits == [result]
 
 
@@ -233,6 +247,7 @@ def test_terminal_transition_on_unfinished_run_is_closed_without_duplicate() -> 
     assert ("old-run", "YIELD_EXTERNAL") in store.finished
     assert "old-run" in store.released
     assert controller.calls == 1
+    assert len(store.resolved) == 1
 
 
 def test_required_store_read_failure_fails_closed_before_controller() -> None:
