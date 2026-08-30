@@ -172,13 +172,16 @@ def marker(key: str) -> str:
 
 
 def render_issue_body(candidate: ImprovementCandidate, config: LoopEngineConfig) -> str:
-    """設定済みAuthorityに結び付けた日本語の改善Issue本文を生成する。"""
+    """自己改善公開先のAuthorityに結び付けた日本語の改善Issue本文を生成する。"""
+    sink = config.self_improvement
+    if not sink.enabled:
+        raise ValueError("自己改善公開先が無効です")
     affected = ", ".join(f"#{item}" for item in candidate.affected_work_ids) or "なし"
     evidence = "\n".join(f"- `{item}`" for item in candidate.evidence_refs) or "- なし"
-    authority = "\n".join(f"- {item}" for item in config.authority_refs) or "- GitHubの現在状態"
+    authority = "\n".join(f"- {item}" for item in sink.authority_refs) or "- GitHubの現在状態"
     return (
         f"{marker(candidate.improvement_key)}\n\n"
-        f"Issue level: {config.issue_level}\n\n"
+        f"Issue level: {sink.issue_level or ''}\n\n"
         "## 正本\n\n"
         f"{authority}\n\n"
         "## 自動生成元\n\n"

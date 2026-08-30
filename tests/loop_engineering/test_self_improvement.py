@@ -111,7 +111,7 @@ def test_generated_issue_body_has_durable_marker_dates_and_authority() -> None:
     candidate = _candidate()
     body = render_issue_body(candidate, config())
     assert marker(candidate.improvement_key) in body
-    assert "#462" in body
+    assert "GitHubの現在状態" in body
     assert "開始日: `2026-08-27`" in body
     assert "目標日: `2026-08-31`" in body
 
@@ -408,6 +408,33 @@ def test_product_label_does_not_flow_into_explicit_self_improvement_sink() -> No
     assert intent.repository == "ktan514/loop-engineering"
     assert intent.project_number == 9
     assert intent.label == "loop-engineering"
+
+
+def test_self_improvement_body_does_not_reuse_product_authority_or_issue_level() -> None:
+    separated = LoopEngineConfig(
+        repository="ktan514/ai-liver-yura",
+        owner="ktan514",
+        project_number=7,
+        mission_issue=450,
+        authority_refs=("#207", "#317", "#450"),
+        issue_level="Product Work",
+        self_improvement=SelfImprovementConfig(
+            enabled=True,
+            repository="ktan514/loop-engineering",
+            owner="ktan514",
+            project_number=9,
+            label="loop-engineering",
+            area="Runtime / Infrastructure",
+            issue_level="Platform Work",
+        ),
+    )
+
+    body = render_issue_body(_candidate(), separated)
+
+    assert "#207" not in body
+    assert "#317" not in body
+    assert "#450" not in body
+    assert "Issue level: Platform Work" in body
 
 
 class SinkProbeRunner:

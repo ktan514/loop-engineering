@@ -21,6 +21,7 @@ class SelfImprovementConfig:
     label: str | None = None
     area: str | None = None
     issue_level: str | None = None
+    authority_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         values = (
@@ -40,6 +41,8 @@ class SelfImprovementConfig:
             raise ValueError("self_improvement.repositoryはowner/name形式で指定してください")
         if self.project_number is None or self.project_number < 1:
             raise ValueError("self_improvement.project_numberは1以上で指定してください")
+        if any(not item.strip() for item in self.authority_refs):
+            raise ValueError("self_improvement.authority_refsに空文字は指定できません")
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,7 +220,6 @@ class LoopEngineeringSettings:
         credentials = _section(parser, "credentials")
         operational_store = _section(parser, "operational_store")
         runtime = _section(parser, "runtime")
-        self_improvement = _self_improvement_from_section(parser)
 
         repository = _required(project, "repository")
         owner = project.get("project_owner", "").strip() or repository.split("/", 1)[0]
@@ -225,6 +227,9 @@ class LoopEngineeringSettings:
         if not workspace.is_absolute():
             raise ValueError("workspace_pathは絶対pathで指定してください")
         workspace = workspace.resolve(strict=False)
+        self_improvement = _self_improvement_from_section(
+            parser, project, workspace, platform_root.resolve(strict=False)
+        )
 
         engine = LoopEngineConfig(
             repository=repository,
@@ -327,6 +332,22 @@ class LoopEngineeringSettings:
                 "LOOP_REVIEWER_API_BASE": self.models.reviewer_api_base,
             }
         )
+        sink = engine.self_improvement
+        values["LOOP_SELF_IMPROVEMENT_ENABLED"] = "true" if sink.enabled else "false"
+        for name, value in (
+            ("REPOSITORY", sink.repository),
+            ("OWNER", sink.owner),
+            ("PROJECT_NUMBER", str(sink.project_number) if sink.project_number else None),
+            ("LABEL", sink.label),
+            ("AREA", sink.area),
+            ("ISSUE_LEVEL", sink.issue_level),
+            ("AUTHORITY_REFS", ",".join(sink.authority_refs) if sink.enabled else None),
+        ):
+            runtime_name = f"LOOP_SELF_IMPROVEMENT_{name}"
+            if value is None:
+                values.pop(runtime_name, None)
+            else:
+                values[runtime_name] = value
         optional_runtime_values: tuple[tuple[str, int | None], ...] = (
             ("LOOP_ROOT_ISSUE", engine.root_issue),
             ("LOOP_PARENT_ISSUE", engine.parent_issue),
@@ -348,8 +369,15 @@ class LoopEngineeringSettings:
         return self.runtime_environment(environment)
 
 
-def _self_improvement_from_section(parser: ConfigParser) -> SelfImprovementConfig:
+def _self_improvement_from_section(
+    parser: ConfigParser,
+    project: SectionProxy,
+    workspace: Path,
+    platform_root: Path,
+) -> SelfImprovementConfig:
     if not parser.has_section("self_improvement"):
+        if workspace == platform_root:
+            return _legacy_self_target_sink(project)
         return SelfImprovementConfig()
     section = parser["self_improvement"]
     enabled = section.getboolean("enabled", fallback=False)
@@ -364,6 +392,24 @@ def _self_improvement_from_section(parser: ConfigParser) -> SelfImprovementConfi
         label=_required(section, "label"),
         area=_required(section, "area"),
         issue_level=_required(section, "issue_level"),
+        authority_refs=_csv(section.get("authority_refs", "")),
+    )
+
+
+def _legacy_self_target_sink(project: SectionProxy) -> SelfImprovementConfig:
+    repository = _required(project, "repository")
+    return SelfImprovementConfig(
+        enabled=True,
+        repository=repository,
+        owner=project.get("project_owner", "").strip() or repository.split("/", 1)[0],
+        project_number=_required_int_section(project, "project_number"),
+        label=project.get("label", "loop-engineering").strip() or "loop-engineering",
+        area=(
+            project.get("improvement_area", "Runtime / Infrastructure").strip()
+            or "Runtime / Infrastructure"
+        ),
+        issue_level=project.get("issue_level", "Work").strip() or "Work",
+        authority_refs=_csv(project.get("authority_refs", "")),
     )
 
 
@@ -380,6 +426,7 @@ def _self_improvement_from_environment(values: Mapping[str, str]) -> SelfImprove
         label=_required_mapping(values, "LOOP_SELF_IMPROVEMENT_LABEL"),
         area=_required_mapping(values, "LOOP_SELF_IMPROVEMENT_AREA"),
         issue_level=_required_mapping(values, "LOOP_SELF_IMPROVEMENT_ISSUE_LEVEL"),
+        authority_refs=_csv(values.get("LOOP_SELF_IMPROVEMENT_AUTHORITY_REFS", "")),
     )
 
 
@@ -471,6 +518,7 @@ def _validate_work_branch_template(template: str) -> None:
 
 
 def _validate_git_branch(branch: str) -> None:
+    components = branch.split("/")
     if (
         not branch
         or branch.startswith("/")
@@ -478,6 +526,7 @@ def _validate_git_branch(branch: str) -> None:
         or "//" in branch
         or ".." in branch
         or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", branch)
+        or any(component.startswith(".") or component.endswith(".lock") for component in components)
     ):
         raise ValueError("work_branch_templateが安全なGit branchではありません")
 

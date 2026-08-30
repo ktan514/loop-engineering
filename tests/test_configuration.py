@@ -155,7 +155,17 @@ def test_product_branch_template_expands_only_issue_placeholder() -> None:
     ).work_branch(123) == "loop/work-123"
 
 
-@pytest.mark.parametrize("template", ("", "feature/{name}", "../work-{issue}", "feature//{issue}"))
+@pytest.mark.parametrize(
+    "template",
+    (
+        "",
+        "feature/{name}",
+        "../work-{issue}",
+        "feature//{issue}",
+        "feature/foo.lock",
+        "feature/.hidden-{issue}",
+    ),
+)
 def test_invalid_product_branch_template_fails_closed(template: str) -> None:
     with pytest.raises(ValueError, match="work_branch_template"):
         LoopEngineConfig(
@@ -221,3 +231,45 @@ def test_settings_load_explicit_self_improvement_sink(tmp_path: Path) -> None:
     assert settings.engine.self_improvement.enabled
     assert settings.engine.self_improvement.repository == "ktan514/loop-engineering"
     assert settings.engine.self_improvement.project_number == 9
+
+
+@pytest.mark.parametrize("enabled", (True, False))
+def test_runtime_environment_round_trips_self_improvement_config(
+    tmp_path: Path, enabled: bool
+) -> None:
+    config = tmp_path / "loop-engineering.ini"
+    _write_config(config, str(tmp_path / "product"))
+    if enabled:
+        with config.open("a", encoding="utf-8") as stream:
+            stream.write(
+                "\n[self_improvement]\n"
+                "enabled = true\nrepository = ktan514/loop-engineering\n"
+                "project_owner = ktan514\nproject_number = 9\n"
+                "label = loop-engineering\narea = Runtime / Infrastructure\n"
+                "issue_level = Work\nauthority_refs = #26, #40\n"
+            )
+    else:
+        with config.open("a", encoding="utf-8") as stream:
+            stream.write("\n[self_improvement]\nenabled = false\n")
+
+    settings = LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+    round_tripped = LoopEngineConfig.from_environment(settings.runtime_environment({}))
+
+    assert round_tripped.self_improvement.enabled is enabled
+    if enabled:
+        assert round_tripped.self_improvement.repository == "ktan514/loop-engineering"
+        assert round_tripped.self_improvement.owner == "ktan514"
+        assert round_tripped.self_improvement.project_number == 9
+        assert round_tripped.self_improvement.label == "loop-engineering"
+        assert round_tripped.self_improvement.area == "Runtime / Infrastructure"
+        assert round_tripped.self_improvement.issue_level == "Work"
+
+
+def test_legacy_self_target_configuration_is_migrated_only_at_platform_root(tmp_path: Path) -> None:
+    config = tmp_path / "loop-engineering.ini"
+    _write_config(config, str(tmp_path))
+
+    settings = LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+
+    assert settings.engine.self_improvement.enabled
+    assert settings.engine.self_improvement.repository == "owner/product"
