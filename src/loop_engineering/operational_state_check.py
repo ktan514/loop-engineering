@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from typing import Protocol
 
-from .postgres_runtime import PostgreSQLCommandAdapter
+
+class OperationalStateCheckDatabase(Protocol):
+    def execute_sql(self, sql: str) -> bool: ...
+
+    def query_json_rows(self, select_sql: str) -> list[dict[str, object]] | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,7 +20,7 @@ class OperationalStateCheckResult:
 
 
 def check_operational_state_round_trip(
-    database: PostgreSQLCommandAdapter,
+    database: OperationalStateCheckDatabase,
     *,
     project_key: str,
     repository: str,
