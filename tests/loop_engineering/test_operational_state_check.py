@@ -48,7 +48,10 @@ def test_round_trip_writes_reads_and_finalizes_without_product_effect() -> None:
     assert result.succeeded
     assert result.detail == "ROUND_TRIP_PASS"
     assert len(database.rows) == 1
-    assert next(iter(database.rows.values()))["status"] == "COMPLETED"
+    row = next(iter(database.rows.values()))
+    assert row["project_key"] == "health:ai-liver-yura"
+    assert row["repository"] == "ktan514/ai-liver-yura"
+    assert row["status"] == "COMPLETED"
 
 
 def test_round_trip_write_failure_is_typed() -> None:
