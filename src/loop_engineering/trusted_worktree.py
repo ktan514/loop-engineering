@@ -104,12 +104,14 @@ class TrustedWorktree:
         *,
         repair: bool,
     ) -> FinalizedWorktree | None:
-        unresolved = self._git_output(("diff", "--name-only", "--diff-filter=U"))
-        if unresolved is None or unresolved.strip():
-            return self._finalize_failed(prepared)
-        if not self._git(("diff", "--check")).succeeded:
-            return self._finalize_failed(prepared)
         if not self._git(("add", "-A")).succeeded:
+            return self._finalize_failed(prepared)
+
+        unmerged = self._git_output(("ls-files", "-u"))
+        if unmerged is None or unmerged.strip():
+            return self._finalize_failed(prepared)
+
+        if not self._git(("diff", "--cached", "--check")).succeeded:
             return self._finalize_failed(prepared)
 
         staged = self._git(("diff", "--cached", "--quiet"))
