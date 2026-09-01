@@ -11,6 +11,7 @@ from .work_state import EffectAttempt, RecoveredWork, WorkRecord
 
 class V2ResumeStatus(str, Enum):
     READY = "READY"
+    FINALIZE_REQUIRED = "FINALIZE_REQUIRED"
     COMPLETED = "COMPLETED"
     RECONCILE_REQUIRED = "RECONCILE_REQUIRED"
     WAITING = "WAITING"
@@ -82,12 +83,19 @@ class V2ResumeCoordinator:
         if recovered is None or not _complete_recovery(recovered):
             return V2ResumeResult(V2ResumeStatus.BLOCKED, "WORK_RECOVERY_MISSING", recovered)
         packet = recovered.task_packet
-        if packet is None or any(
-            attempt.packet_generation != packet.generation for attempt in recovered.pending_effects
-        ):
+        checkpoint = recovered.checkpoint
+        if packet is None or checkpoint is None:
+            return V2ResumeResult(V2ResumeStatus.BLOCKED, "WORK_RECOVERY_MISSING", recovered)
+        if any(attempt.packet_generation != packet.generation for attempt in recovered.pending_effects):
             return V2ResumeResult(
                 V2ResumeStatus.RECONCILE_REQUIRED,
                 "EFFECT_PACKET_MISMATCH",
+                recovered,
+            )
+        if recovered.pending_effects and packet.status != "STARTED":
+            return V2ResumeResult(
+                V2ResumeStatus.RECONCILE_REQUIRED,
+                "EFFECT_PACKET_STATE_MISMATCH",
                 recovered,
             )
 
@@ -122,6 +130,7 @@ class V2ResumeCoordinator:
             if readback is EffectReadbackStatus.NO_EFFECT:
                 self._recovery.record_effect_outcome(attempt.idempotency_key, "NO_EFFECT")
                 continue
+            self._recovery.record_effect_outcome(attempt.idempotency_key, "UNCERTAIN")
             return V2ResumeResult(
                 V2ResumeStatus.RECONCILE_REQUIRED,
                 "EFFECT_READBACK_UNKNOWN",
@@ -131,7 +140,33 @@ class V2ResumeCoordinator:
         if definition.status is WorkDefinitionStatus.COMPLETED:
             return V2ResumeResult(V2ResumeStatus.COMPLETED, "WORK_COMPLETED", recovered)
 
-        return V2ResumeResult(V2ResumeStatus.READY, "RESUME_READY", recovered)
+        if packet.status == "ISSUED":
+            if checkpoint.checkpoint_kind != "SAFE_POINT":
+                return V2ResumeResult(
+                    V2ResumeStatus.RECONCILE_REQUIRED,
+                    "PACKET_CHECKPOINT_MISMATCH",
+                    recovered,
+                )
+            return V2ResumeResult(V2ResumeStatus.READY, "RESUME_READY", recovered)
+        if packet.status == "STARTED":
+            return V2ResumeResult(
+                V2ResumeStatus.FINALIZE_REQUIRED,
+                "PACKET_FINALIZATION_REQUIRED",
+                recovered,
+            )
+        if packet.status in {"COMPLETED", "SUPERSEDED"}:
+            return V2ResumeResult(V2ResumeStatus.WAITING, "PACKET_TERMINAL", recovered)
+        if packet.status == "UNCERTAIN":
+            return V2ResumeResult(
+                V2ResumeStatus.RECONCILE_REQUIRED,
+                "PACKET_UNCERTAIN",
+                recovered,
+            )
+        return V2ResumeResult(
+            V2ResumeStatus.RECONCILE_REQUIRED,
+            "PACKET_STATUS_INVALID",
+            recovered,
+        )
 
 
 def _complete_recovery(recovered: RecoveredWork) -> bool:
