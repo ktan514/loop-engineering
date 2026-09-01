@@ -78,6 +78,12 @@ class V2MigrationAndIssuanceService:
                     "WORK_CLOSED_BEFORE_MIGRATION",
                     work_identity,
                 )
+            if definition.status is WorkDefinitionStatus.ACCEPTANCE_CRITERIA_MISSING:
+                return V2OperationResult(
+                    V2OperationStatus.BLOCKED,
+                    "ACCEPTANCE_CRITERIA_DIGEST_MISSING",
+                    work_identity,
+                )
             if definition.status is not WorkDefinitionStatus.READY or definition.record is None:
                 return V2OperationResult(
                     V2OperationStatus.BLOCKED,
@@ -150,6 +156,12 @@ class V2MigrationAndIssuanceService:
                 return V2OperationResult(
                     V2OperationStatus.WAITING,
                     "DEPENDENCY_PENDING",
+                    work_identity,
+                )
+            if definition.status is WorkDefinitionStatus.ACCEPTANCE_CRITERIA_MISSING:
+                return V2OperationResult(
+                    V2OperationStatus.BLOCKED,
+                    "ACCEPTANCE_CRITERIA_DIGEST_MISSING",
                     work_identity,
                 )
             if definition.status is not WorkDefinitionStatus.READY or definition.record is None:
