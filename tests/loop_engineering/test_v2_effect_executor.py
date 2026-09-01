@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Sequence
 
 from loop_engineering.v2_effect_executor import (
     GitHubV2EffectExecutor,
