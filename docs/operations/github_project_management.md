@@ -7,7 +7,7 @@
 - GitHub Project: `loop-engineering`
 - 管理対象: Loop Engineering本体の設計、実装、検証、統合、管理、自己改善
 
-この文書は`ai-liver-yura`のProject #7運用、Issue #207、Issue #384、`AGENTS.md`からLoop Engineering専用Repositoryへ引き継いだ運用規則を定義する。
+この文書は`ai-liver-yura`のProject #7運用、Issue #207、Issue #384、既存Repository規約からLoop Engineering専用Repositoryへ引き継いだ運用規則を定義する。
 
 ## 2. 現在状態の正本
 
@@ -68,7 +68,9 @@ field ID、option ID、Project item IDを保存値から推測して変更しな
 
 `Ready`または`In progress`へ進むIssueには`Start date`と`Target date`を設定する。
 
-日程は計画情報であり、品質Gateを緩める根拠にしない。Project fieldが利用可能なら日程の正本はProject側とし、Issue本文の日付は移行・fallback用の記録とする。
+日程は計画情報であり、品質Gateを緩める根拠にしない。GitHub Project `loop-engineering` の`Start date` / `Target date`を計画日程の正本とし、Issue本文へ同じ予定日を重複記載しない。
+
+既存Issue本文に残る予定日は履歴・移行証拠としてのみ扱い、現在計画のAuthorityに使用しない。
 
 ## 7. Branch / PR
 
@@ -118,7 +120,7 @@ review待ちだけをMission STOPにしない。同一exact HEADへの同一レ�
 
 ## 12. 文章言語
 
-`AGENTS.md`をRepository文章言語の正本とする。
+`docs/GITHUB_OPERATION_RULES.md`、`docs/REPOSITORY_RULES.md`、`docs/architecture/v2/commit_message_language_policy.md`をRepository文章言語の正本とする。
 
 人間向け文章は日本語を基本言語とし、必要な英語技術語は自然な日本語の意味を先に表し、必要な場合だけ原語を括弧内へ併記する。機械識別子、status値、command、path、branch、SHA、class/function/field名、machine-readable値は維持してよい。
 
