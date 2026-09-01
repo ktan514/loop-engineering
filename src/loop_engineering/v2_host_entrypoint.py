@@ -5,9 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import Callable, Protocol
+from typing import Protocol
 
 from .v2_effect_executor import V2EffectExecutionResult
 from .v2_execution_state import (
