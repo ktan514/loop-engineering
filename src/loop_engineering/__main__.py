@@ -15,6 +15,7 @@ from .v2_cli import (
     add_v2_arguments,
     legacy_host_block_reason,
     run_v2_command,
+    v2_arguments_present,
     v2_requested,
 )
 
@@ -94,6 +95,10 @@ def main() -> int:
         repository=settings.engine.repository,
         environment=environment,
     )
+
+    if v2_arguments_present(arguments) and not v2_requested(arguments):
+        print(json.dumps({"status": "BLOCKED", "detail": "V2_COMMAND_REQUIRED"}))
+        return 3
 
     if v2_requested(arguments):
         if any(
