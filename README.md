@@ -109,12 +109,25 @@ CLIからWorkspace path自体を直接上書きする方式は通常経路にし
 
 起動時に設定されたWorkspaceのcanonical path、Git root、remote Repository identity、HEAD、dirty stateを確認し、設定対象と一致しないWorkspaceでは変更を開始しません。
 
+## 開発規約
+
+AIを含むRepository作業は、最初に次を確認します。
+
+- `AGENTS.md`: 作業開始時の入口
+- `docs/GITHUB_OPERATION_RULES.md`: 共通GitHub運用規約
+- `docs/REPOSITORY_RULES.md`: `loop-engineering`固有規約
+- `CONTRIBUTING.md`: 基本的な開発フロー
+
+IssueとPull Requestは `.github/` 配下の標準テンプレートを使用します。Project fieldで管理するStatus、Priority、Start date、Target date等をIssue本文へ重複管理しません。
+
 ## 設計・運用
 
 - Platform / Product / Workspace境界: `docs/architecture/workspace_boundary.md`
 - Project Profile: `docs/architecture/project_profile.md`
 - 設定と秘密情報: `docs/architecture/configuration_and_secrets.md`
 - env読込境界: `docs/operations/env_loading_contract.md`
+- GitHub共通運用規約: `docs/GITHUB_OPERATION_RULES.md`
+- Repository固有規約: `docs/REPOSITORY_RULES.md`
 - GitHub運用: `docs/operations/github_project_management.md`
 - active Mission Goal: `docs/operations/loop_mission_goal.md`
 
