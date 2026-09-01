@@ -48,8 +48,7 @@ class SubprocessV2CommandRunner:
             env=dict(self.environment),
             check=True,
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
         )
         return completed.stdout
 
