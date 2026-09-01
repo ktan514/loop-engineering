@@ -7,6 +7,7 @@ import pytest
 from loop_engineering.v2_execution_state import (
     V2ExecutionPacket,
     V2ExecutionStateStore,
+    V2PacketPlan,
     build_packet_plan,
     packet_identity,
 )
@@ -47,7 +48,7 @@ def record(*, lifecycle: str = "PLANNED") -> WorkRecord:
     )
 
 
-def push_plan(generation: int = 1):
+def push_plan(generation: int = 1) -> V2PacketPlan:
     return build_packet_plan(
         work_identity=record().identity,
         generation=generation,
