@@ -1,0 +1,219 @@
+# loop-engineering リポジトリ固有規約
+
+共通規約は `GITHUB_OPERATION_RULES.md` を正本とする。本書は `loop-engineering` に必要な追加・強化規約を定義し、共通規約を緩和しない。
+
+## 実行環境
+
+- Python: Repositoryの `.python-version` を正本とする。
+- Python依存管理: Pipenvとcommit済み `Pipfile.lock` を使用する。
+- 永続運用状態: PostgreSQL。ローカル標準はDocker経由とする。
+- GitHub操作: GitHub live stateを正本とし、対象identityを明示する。
+
+## テスト・検証コマンド
+
+実装・設定変更では原則として次を確認する。
+
+```bash
+pipenv run ruff check src tests
+pipenv run mypy --strict src tests
+pipenv run pytest
+pipenv run python -m compileall -q src tests
+git diff --check
+```
+
+Pull Requestでは `.github/workflows/ci.yml` のexact-head CIを最終証拠として使用し、HEAD変更後は旧CI・reviewを現在HEADのPASSとして扱わない。
+
+## 保護対象branch
+
+- `main`
+
+`main`へ通常開発commitを直接pushしない。変更は作業branchとPull Requestを経由する。
+
+通常PRの統合方式はmerge commitとし、作業branchの系譜をGit Graph上に保持する。詳細は `docs/architecture/v2/branch_lifecycle_and_commit_hygiene.md` を正本とする。
+
+## 関連するRepository正本
+
+- GitHub開発運用: `docs/operations/github_workflow.md`
+- branch lifecycle / commit hygiene: `docs/architecture/v2/branch_lifecycle_and_commit_hygiene.md`
+- commit message言語: `docs/architecture/v2/commit_message_language_policy.md`
+- Projects v2管理: `docs/architecture/v2/project_v2_management_spec.md`
+- V2 runtime / state設計: `docs/architecture/v2/**`
+
+## ファイルシステム変更の安全規則
+
+ファイルやdirectoryの作成・上書き・移動・削除は、対象pathだけでなく既存namespaceとのmergeや親directory配下への影響を伴い得る。操作の種類だけで安全と判断せず、実際に変更される範囲を事前に確定する。
+
+- `mkdir` / `mkdir -p`、redirectによる上書き、`cp`、`mv`、install先の作成、`rm` / `rm -r` / `rm -rf`、`git clean`、`git reset --hard`など、既存pathまたは未commitデータへ影響し得る操作の前に、実際に解決される対象pathと現在状態を確認する。
+- 同名pathが既に存在する場合、それを今回の作業で作成したものと推測しない。既存内容、用途、共有範囲、今回の作業との関係を確認し、再利用・merge・上書き・移動・削除のどれが適切か判断する。
+- directoryを削除する場合は、削除前に直下の内容を確認し、必要に応じて配下まで確認して、directory全体が今回の削除対象であることを確定する。削除対象外のfileやdirectoryが含まれる場合、親directoryごと削除せず、不要と確認できた対象だけを操作する。
+- `rm -rf`は一時directoryだけに限定しない。ただし、解決後の対象directory全体が削除範囲であり、その配下に残すべき対象がないことを確認できた場合だけ実行する。
+- path変数、`$HOME`、wildcard、相対pathを含む変更操作では、展開・正規化後にどこへ作用するかを確認する。親directoryや共有namespaceを広く対象にして一部artifactだけを掃除しない。
+- 既存状態、用途、所有境界、操作範囲を十分に確認できない場合は、推測で変更せず停止して判断を求める。
+- 外部toolが見つからない場合、環境全体へ新規installする前に、既存binary、既存設定、Repository標準の実行経路を確認する。環境変更が必要な場合も既存pathとの競合を確認し、分離可能ならProject-localな変更を優先する。
+
+## Repository文章言語ルール
+
+このリポジトリで人間が読むために書く文章は、日本語を唯一の基本言語とする。
+
+対象は次を含む。
+
+- Markdown、README、設計書、運用書、履歴文書
+- Issue本文、Issue comment、Checkpoint
+- PR本文、PR comment、review説明
+- Mission Checkpoint、Resume Certificate
+- commit messageの説明部分
+- GitHubのcommit comment
+- コード内comment
+- docstring
+- 人間向けのlog、warning、error説明文
+- 設定ファイルやworkflow内の人間向けcomment
+
+英語だけで成立する文章、見出し、説明段落、comment、docstringは作成しない。既存の英語文章も翻訳対象とし、安全な通常変更で順次日本語へ置き換える。
+
+### 英語技術語の扱い
+
+人間向け文章では、英語の概念名や技術語を日本語文の名詞としてそのまま置かない。意味を自然な日本語で先に表現し、原語を残す必要がある場合だけ括弧内へ併記する。
+
+例:
+
+- NG: `directed questionの意味契約を正本化する`
+- OK: `相手へ回答を求める問いかけ（directed question）の意味契約を正本化する`
+- NG: `fallback policyを更新する`
+- OK: `失敗時の代替方針（fallback policy）を更新する`
+- NG: `stale resultを拒否する`
+- OK: `古くなった結果（stale result）を拒否する`
+
+直訳して不自然になる場合は直訳を使わず、その概念がこのRepository内で意味する内容を自然な日本語で表す。原語の併記は識別・検索・外部仕様との対応付けに必要な場合だけ行う。同じ節や短い文脈内で意味が明らかな場合は、2回目以降の原語併記を省略してよい。
+
+次は機械識別子・運用識別子・固有表現として、そのまま使用してよい。
+
+- `GitHub`、`API`、`Issue`、`PR`等の固有名詞・広く定着した名称
+- `PASS`、`FAIL`、`ACTIVE`、`NOT_RUN`、`REQUEST_CHANGES`等のstatus値
+- command、file path、branch名、SHA、class名、function名、field名
+- machine-readable JSONのkey/value
+- 製品名、ライブラリ名、protocol名、外部仕様の固定値
+- commit messageの識別prefixである `fix:`、`feat:`、`docs:`、`test:`、`refactor:`、`chore:` 等
+- branchの識別prefixである `feature/`、`fix/`、`docs/`、`test/`、`refactor/` 等
+- 外部API等の原文を、原文であることを明示して引用する必要がある場合
+
+機能追加の命名は次へ統一する。
+
+- commit message: `feat: 日本語の変更説明`
+- branch: `feature/xxx`
+
+`feat/...`をbranch prefixとして使用しない。`feature:`をcommit prefixとして使用しない。
+
+commit messageではprefixを英語識別子のまま使用してよいが、prefix以降の変更説明は日本語で成立させる。
+
+例:
+
+- `fix: Mission Checkpointの対象解決を修正する`
+- `feat: Workspace設定の読み込みを追加する`
+- `test: 回帰試験を追加する`
+- `docs: 設定手順を更新する`
+
+これらを日本語文章の中で使う場合も、説明文章全体は日本語として成立させる。コードの識別子、schema、protocol値、機械可読値は文章言語ルールの対象外とする。
+
+既存の英語commit messageは、prefixだけが英語で説明本文が日本語なら是正対象にしない。説明本文まで英語だけで構成されたcommit messageは、履歴を安全に書き換えられる場合に限り日本語化対象とする。編集可能な既存文書、comment、docstring、GitHub comment類は日本語へ是正する。
+
+## 自律Completion Missionの継続
+
+このリポジトリでAutonomous Completion MissionがACTIVEの場合、個別のユーザープロンプトを新しい独立Missionとして扱わない。
+
+ユーザーからの修正指示、設計判断、質問への回答、blocker解消指示、調査依頼、優先順位変更等は、明示的なMission終了指示がない限り、現在のMissionへの一時的な介入として扱う。
+
+介入処理が完了したら、その介入だけを完了して停止してはならない。
+
+必ず次を行う。
+
+1. GitHub live状態を再確認する
+2. Missionの最新Checkpointを確認する
+3. current WorkのResume Gateを再確認する
+4. blockerが解消したことを確認する
+5. Mission stateをACTIVEへ戻す
+6. 元のcurrent Workを再開する
+7. Work Completion後はdependency-readyな次Workをfresh Resume Gateで選択して継続する
+
+### Missionの終了
+
+Missionを終了できるのは、ユーザーが明示的に次のいずれかを指示した場合だけとする。
+
+- `MISSION END`
+- `MISSION CANCEL`
+- Autonomous Completion Missionそのものを終了する明示指示
+
+単なる質問、修正依頼、方針回答、調査依頼、「Aで進めて」「それを修正して」「この方針で進めて」等はMission終了として扱わない。
+
+### 一時停止
+
+真のSTOP条件が発生した場合は作業を一時停止してよいが、Mission自体を終了してはならない。
+
+Mission stateを `PAUSED_FOR_INTERVENTION` とし、GitHubのMission管理Issueおよび必要に応じてcurrent Work IssueへCheckpointを残す。
+
+Checkpointには最低限、次を記録する。
+
+- Mission名
+- Mission state
+- current Work Issue
+- current PR / branch
+- exact HEAD
+- 完了済み作業
+- STOP reason
+- ユーザー判断が必要な内容
+- 再開後の最初のaction
+
+ユーザーの介入によってSTOP理由が解消した場合は、その介入処理だけで終了せず、元のMissionへ自動復帰する。
+
+### STOP条件ではないもの
+
+次は通常の作業継続条件であり、STOP理由にしない。
+
+- test failure
+- lint / type check failure
+- CI failure
+- canonical reviewのblocking finding
+- 修正可能なbug
+- targeted test PASS
+- commit完了
+- push完了
+- PR更新完了
+- 個別工程完了
+- Work Issue単体の実装完了
+
+修正可能である限りfix / test / review loopを継続する。
+
+### 外部canonical review待ち
+
+`independent canonical review pending` は Human Intervention ではなく、`PAUSED_FOR_INTERVENTION` / Mission STOP条件として扱わない。
+
+current Workだけを `REVIEW_PENDING` として記録し、Mission stateは `ACTIVE` を維持する。
+
+同一exact HEADについては次を厳守する。
+
+- independent canonical reviewの依頼・要求は1回だけ行う
+- review到着確認のためにsleep / retry / pollingを繰り返さない
+- 同じHEADへ重複review依頼を投稿しない
+- 新しいHEADが作られた場合だけ、新HEADに対するreview依頼を新規に行える
+
+review待ち中に、そのWorkへ依存しないdependency-ready Workが存在する場合は、GitHub live dependency graphを確認し、fresh Resume Gateを通してそちらを進める。review待ちのlineageへ無関係な変更を混ぜてはならない。
+
+進められる独立Workが存在しない場合は、その実行runを安全に終了してよいが、MissionをHuman Intervention待ちへ変更しない。
+
+pending reviewを再確認してよいのは、原則として次の場合だけとする。
+
+- reviewerから新しいreview / notificationが到着した
+- 別の有用なWorkが完了した
+- dependency判断上、そのreview結果が必要になった
+- ユーザーが明示的に状態確認を依頼した
+
+reviewがHOLDの場合は通常のfix / test / new-head review loopへ戻る。blocking 0の場合はReady / merge / trunk verification / Work Completionへ進む。
+
+reviewerは、同一exact HEADについて確認可能なblocking findingを可能な限り一度のreviewへまとめ、既に確認可能だった指摘を細切れに後出しして不要なreview cycleを増やさない。
+
+### MissionとWorkの関係
+
+Autonomous Completion Missionは個別Work Issueより上位の継続目標である。個別Workの完了はMission完了を意味しない。
+
+current Workが完了したらGitHub live dependency graphを再確認し、次のdependency-ready Workについてfresh Resume Gateを通して継続する。
+
+Missionの最終完了条件は、Mission管理IssueおよびRoot Issueが定義する全体完成条件を満たした場合だけとする。
