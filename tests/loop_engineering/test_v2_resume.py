@@ -159,13 +159,58 @@ def test_missing_or_inconsistent_recovery_stays_blocked_before_definition_sync()
     assert inconsistent.detail == "WORK_RECOVERY_MISSING"
 
 
+def test_effect_packet_generation_mismatch_stops_before_any_provider_read() -> None:
+    mismatch = EffectAttempt(
+        "effect:62:old",
+        record().identity,
+        "PUSH",
+        "branch:feature/v2",
+        "UNCERTAIN",
+        packet_generation=2,
+        expected_preconditions=(("head", "before"),),
+        expected_effect=(("head", "after"),),
+    )
+    definitions = Definitions(record())
+    effects = Effects(EffectReadbackStatus.CONFIRMED)
+    recovery = Recovery(recovered(pending=(mismatch,)))
+
+    result = V2ResumeCoordinator(recovery, definitions, effects).resume(record().identity)
+
+    assert result.status is V2ResumeStatus.RECONCILE_REQUIRED
+    assert result.detail == "EFFECT_PACKET_MISMATCH"
+    assert definitions.calls == 0
+    assert effects.calls == []
+    assert recovery.synchronized == []
+    assert recovery.outcomes == []
+
+    missing_generation = EffectAttempt(
+        "effect:62:legacy",
+        record().identity,
+        "PUSH",
+        "branch:feature/v2",
+        "UNCERTAIN",
+        expected_preconditions=(("head", "before"),),
+        expected_effect=(("head", "after"),),
+    )
+    result = V2ResumeCoordinator(
+        Recovery(recovered(pending=(missing_generation,))),
+        Definitions(record()),
+        Effects(EffectReadbackStatus.CONFIRMED),
+    ).resume(record().identity)
+    assert result.status is V2ResumeStatus.RECONCILE_REQUIRED
+    assert result.detail == "EFFECT_PACKET_MISMATCH"
+
+
 def test_unknown_effect_stops_before_any_new_execution() -> None:
     attempt = EffectAttempt(
         "effect:62:1",
         record().identity,
         "MERGE",
-        "pr:63|head:abc",
+        "pr:63",
         "UNCERTAIN",
+        packet_generation=1,
+        expected_preconditions=(("head", "abc"), ("base", "main"), ("state", "OPEN")),
+        expected_effect=(("state", "MERGED"),),
     )
     recovery = Recovery(recovered(pending=(attempt,)))
     effects = Effects(EffectReadbackStatus.UNKNOWN)
@@ -185,6 +230,9 @@ def test_confirmed_and_no_effect_are_recorded_before_ready() -> None:
         "PUSH",
         "branch:feature/v2",
         "INTENT_RECORDED",
+        packet_generation=1,
+        expected_preconditions=(("head", "before"),),
+        expected_effect=(("head", "after"),),
     )
     recovery = Recovery(recovered(pending=(attempt,)))
 
