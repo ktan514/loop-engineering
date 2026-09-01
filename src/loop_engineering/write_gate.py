@@ -8,13 +8,13 @@ from .config import LoopEngineConfig
 from .models import ConflictKind, WriteGateResult, WriteIntent
 
 
-def validate(
+def validate_preconditions(
     intent: WriteIntent,
     fresh_preconditions: Mapping[str, str],
-    readback_effect: Mapping[str, str] | None = None,
     *,
     config: LoopEngineConfig,
 ) -> WriteGateResult:
+    """外部変更前にtarget identityと事前条件だけを検証する。"""
     if intent.target_kind == "project":
         allowed_projects = {str(config.project_number)}
         sink = config.self_improvement
@@ -34,6 +34,20 @@ def validate(
         return WriteGateResult(False, ConflictKind.STALE_WRITE_GATE)
     if intent.mutation_kind == "verify_effect" and not intent.expected_effect:
         return WriteGateResult(False, ConflictKind.NO_OP_MUTATION_FORBIDDEN)
+    return WriteGateResult(True, None)
+
+
+def validate(
+    intent: WriteIntent,
+    fresh_preconditions: Mapping[str, str],
+    readback_effect: Mapping[str, str] | None = None,
+    *,
+    config: LoopEngineConfig,
+) -> WriteGateResult:
+    """互換入口として事前条件と変更後効果をまとめて検証する。"""
+    precondition_result = validate_preconditions(intent, fresh_preconditions, config=config)
+    if not precondition_result.allowed:
+        return precondition_result
     if intent.expected_effect and readback_effect is None:
         return WriteGateResult(False, ConflictKind.MUTATION_EFFECT_MISMATCH)
     if readback_effect is not None and any(

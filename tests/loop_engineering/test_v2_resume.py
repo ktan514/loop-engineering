@@ -31,22 +31,22 @@ def record() -> WorkRecord:
     )
 
 
-def packet() -> WorkTaskPacket:
+def packet(*, status: str = "ISSUED") -> WorkTaskPacket:
     return WorkTaskPacket(
         identity="packet:62:1",
         work_identity=record().identity,
         generation=1,
         transition="IMPLEMENT",
-        status="ISSUED",
+        status=status,
     )
 
 
-def checkpoint() -> WorkCheckpoint:
+def checkpoint(*, kind: str = "SAFE_POINT") -> WorkCheckpoint:
     return WorkCheckpoint(
         identity="checkpoint:62:1",
         work_identity=record().identity,
         run_identity="run:62:1",
-        checkpoint_kind="SAFE_POINT",
+        checkpoint_kind=kind,
         resumable_state="IMPLEMENT_READY",
         next_action="作業パケットを実行する",
         task_packet_identity=packet().identity,
@@ -73,20 +73,20 @@ class Recovery:
 @dataclass
 class Definitions:
     value: WorkRecord | None
+    status: WorkDefinitionStatus | None = None
     calls: int = 0
 
     def synchronize(self, current: WorkRecord) -> WorkDefinitionResult:
         assert current == record()
         self.calls += 1
-        status = (
-            WorkDefinitionStatus.READY
-            if self.value is not None
-            else WorkDefinitionStatus.UNAVAILABLE
-        )
-        return WorkDefinitionResult(
-            status,
-            self.value,
-        )
+        resolved_status = self.status
+        if resolved_status is None:
+            resolved_status = (
+                WorkDefinitionStatus.READY
+                if self.value is not None
+                else WorkDefinitionStatus.UNAVAILABLE
+            )
+        return WorkDefinitionResult(resolved_status, self.value)
 
 
 @dataclass
@@ -113,7 +113,15 @@ def recovered(
     )
 
 
-def test_resume_is_ready_after_complete_db_recovery_and_definition_sync() -> None:
+def pending_recovery(attempt: EffectAttempt) -> RecoveredWork:
+    return recovered(
+        pending=(attempt,),
+        task_packet=packet(status="STARTED"),
+        safe_checkpoint=checkpoint(kind="EFFECT_PENDING"),
+    )
+
+
+def test_resume_is_ready_only_for_issued_packet_and_safe_checkpoint() -> None:
     recovery = Recovery(recovered())
     definitions = Definitions(record())
     effects = Effects(EffectReadbackStatus.CONFIRMED)
@@ -124,6 +132,21 @@ def test_resume_is_ready_after_complete_db_recovery_and_definition_sync() -> Non
     assert result.detail == "RESUME_READY"
     assert recovery.synchronized == [record()]
     assert effects.calls == []
+
+
+def test_acceptance_criteria_digest_missing_is_typed_blocked() -> None:
+    recovery = Recovery(recovered())
+    definitions = Definitions(None, status=WorkDefinitionStatus.ACCEPTANCE_CRITERIA_MISSING)
+
+    result = V2ResumeCoordinator(
+        recovery,
+        definitions,
+        Effects(EffectReadbackStatus.CONFIRMED),
+    ).resume(record().identity)
+
+    assert result.status is V2ResumeStatus.BLOCKED
+    assert result.detail == "ACCEPTANCE_CRITERIA_DIGEST_MISSING"
+    assert recovery.synchronized == []
 
 
 def test_missing_or_inconsistent_recovery_stays_blocked_before_definition_sync() -> None:
@@ -172,7 +195,7 @@ def test_effect_packet_generation_mismatch_stops_before_any_provider_read() -> N
     )
     definitions = Definitions(record())
     effects = Effects(EffectReadbackStatus.CONFIRMED)
-    recovery = Recovery(recovered(pending=(mismatch,)))
+    recovery = Recovery(pending_recovery(mismatch))
 
     result = V2ResumeCoordinator(recovery, definitions, effects).resume(record().identity)
 
@@ -193,7 +216,7 @@ def test_effect_packet_generation_mismatch_stops_before_any_provider_read() -> N
         expected_effect=(("head", "after"),),
     )
     result = V2ResumeCoordinator(
-        Recovery(recovered(pending=(missing_generation,))),
+        Recovery(pending_recovery(missing_generation)),
         Definitions(record()),
         Effects(EffectReadbackStatus.CONFIRMED),
     ).resume(record().identity)
@@ -201,29 +224,7 @@ def test_effect_packet_generation_mismatch_stops_before_any_provider_read() -> N
     assert result.detail == "EFFECT_PACKET_MISMATCH"
 
 
-def test_unknown_effect_stops_before_any_new_execution() -> None:
-    attempt = EffectAttempt(
-        "effect:62:1",
-        record().identity,
-        "MERGE",
-        "pr:63",
-        "UNCERTAIN",
-        packet_generation=1,
-        expected_preconditions=(("head", "abc"), ("base", "main"), ("state", "OPEN")),
-        expected_effect=(("state", "MERGED"),),
-    )
-    recovery = Recovery(recovered(pending=(attempt,)))
-    effects = Effects(EffectReadbackStatus.UNKNOWN)
-
-    result = V2ResumeCoordinator(recovery, Definitions(record()), effects).resume(record().identity)
-
-    assert result.status is V2ResumeStatus.RECONCILE_REQUIRED
-    assert result.detail == "EFFECT_READBACK_UNKNOWN"
-    assert recovery.outcomes == []
-    assert effects.calls == [attempt]
-
-
-def test_confirmed_and_no_effect_are_recorded_before_ready() -> None:
+def test_pending_effect_on_non_started_packet_is_rejected_without_readback() -> None:
     attempt = EffectAttempt(
         "effect:62:1",
         record().identity,
@@ -234,7 +235,53 @@ def test_confirmed_and_no_effect_are_recorded_before_ready() -> None:
         expected_preconditions=(("head", "before"),),
         expected_effect=(("head", "after"),),
     )
-    recovery = Recovery(recovered(pending=(attempt,)))
+    effects = Effects(EffectReadbackStatus.CONFIRMED)
+
+    result = V2ResumeCoordinator(
+        Recovery(recovered(pending=(attempt,))),
+        Definitions(record()),
+        effects,
+    ).resume(record().identity)
+
+    assert result.status is V2ResumeStatus.RECONCILE_REQUIRED
+    assert result.detail == "EFFECT_PACKET_STATE_MISMATCH"
+    assert effects.calls == []
+
+
+def test_unknown_effect_becomes_uncertain_and_is_never_ready() -> None:
+    attempt = EffectAttempt(
+        "effect:62:1",
+        record().identity,
+        "MERGE",
+        "pr:63",
+        "INTENT_RECORDED",
+        packet_generation=1,
+        expected_preconditions=(("head", "abc"), ("base", "main"), ("state", "OPEN")),
+        expected_effect=(("state", "MERGED"),),
+    )
+    recovery = Recovery(pending_recovery(attempt))
+    effects = Effects(EffectReadbackStatus.UNKNOWN)
+
+    result = V2ResumeCoordinator(recovery, Definitions(record()), effects).resume(record().identity)
+
+    assert result.status is V2ResumeStatus.RECONCILE_REQUIRED
+    assert result.detail == "EFFECT_READBACK_UNKNOWN"
+    assert recovery.outcomes == [(attempt.idempotency_key, "UNCERTAIN")]
+    assert effects.calls == [attempt]
+
+
+def test_confirmed_and_no_effect_require_finalization_instead_of_reexecution() -> None:
+    attempt = EffectAttempt(
+        "effect:62:1",
+        record().identity,
+        "PUSH",
+        "branch:feature/v2",
+        "INTENT_RECORDED",
+        packet_generation=1,
+        expected_preconditions=(("head", "before"),),
+        expected_effect=(("head", "after"),),
+    )
+    recovery = Recovery(pending_recovery(attempt))
 
     confirmed = V2ResumeCoordinator(
         recovery,
@@ -242,18 +289,48 @@ def test_confirmed_and_no_effect_are_recorded_before_ready() -> None:
         Effects(EffectReadbackStatus.CONFIRMED),
     ).resume(record().identity)
 
-    assert confirmed.status is V2ResumeStatus.READY
+    assert confirmed.status is V2ResumeStatus.FINALIZE_REQUIRED
     assert recovery.outcomes == [(attempt.idempotency_key, "CONFIRMED")]
 
-    recovery = Recovery(recovered(pending=(attempt,)))
+    recovery = Recovery(pending_recovery(attempt))
     no_effect = V2ResumeCoordinator(
         recovery,
         Definitions(record()),
         Effects(EffectReadbackStatus.NO_EFFECT),
     ).resume(record().identity)
 
-    assert no_effect.status is V2ResumeStatus.READY
+    assert no_effect.status is V2ResumeStatus.FINALIZE_REQUIRED
     assert recovery.outcomes == [(attempt.idempotency_key, "NO_EFFECT")]
+
+
+def test_started_packet_without_pending_effect_still_requires_finalization() -> None:
+    value = recovered(
+        task_packet=packet(status="STARTED"),
+        safe_checkpoint=checkpoint(kind="EFFECT_PENDING"),
+    )
+    result = V2ResumeCoordinator(
+        Recovery(value),
+        Definitions(record()),
+        Effects(EffectReadbackStatus.CONFIRMED),
+    ).resume(record().identity)
+
+    assert result.status is V2ResumeStatus.FINALIZE_REQUIRED
+    assert result.detail == "PACKET_FINALIZATION_REQUIRED"
+
+
+def test_terminal_packet_waits_for_explicit_new_packet_and_never_becomes_ready() -> None:
+    for status in ("COMPLETED", "SUPERSEDED"):
+        value = recovered(
+            task_packet=packet(status=status),
+            safe_checkpoint=checkpoint(kind="EFFECT_CONFIRMED"),
+        )
+        result = V2ResumeCoordinator(
+            Recovery(value),
+            Definitions(record()),
+            Effects(EffectReadbackStatus.CONFIRMED),
+        ).resume(record().identity)
+        assert result.status is V2ResumeStatus.WAITING
+        assert result.detail == "PACKET_TERMINAL"
 
 
 def test_missing_or_conflicting_work_stays_blocked() -> None:
