@@ -35,6 +35,7 @@ class WorkDefinitionStatus(str, Enum):
     READY = "READY"
     COMPLETED = "COMPLETED"
     UNAVAILABLE = "UNAVAILABLE"
+    ACCEPTANCE_CRITERIA_MISSING = "ACCEPTANCE_CRITERIA_MISSING"
     CLOSED_BEFORE_COMPLETION = "CLOSED_BEFORE_COMPLETION"
     DEPENDENCY_PENDING = "DEPENDENCY_PENDING"
 
@@ -108,6 +109,12 @@ class V2ResumeCoordinator:
         if definition.status is WorkDefinitionStatus.CLOSED_BEFORE_COMPLETION:
             return V2ResumeResult(
                 V2ResumeStatus.BLOCKED, "WORK_CLOSED_BEFORE_COMPLETION", recovered
+            )
+        if definition.status is WorkDefinitionStatus.ACCEPTANCE_CRITERIA_MISSING:
+            return V2ResumeResult(
+                V2ResumeStatus.BLOCKED,
+                "ACCEPTANCE_CRITERIA_DIGEST_MISSING",
+                recovered,
             )
         synchronized = definition.record
         accepted_statuses = {WorkDefinitionStatus.READY, WorkDefinitionStatus.COMPLETED}
