@@ -1,5 +1,5 @@
 from loop_engineering.models import ConflictKind, WriteIntent
-from loop_engineering.write_gate import validate
+from loop_engineering.write_gate import validate, validate_preconditions
 
 from .conftest import config
 
@@ -51,6 +51,33 @@ def test_write_gate_requires_exact_precondition_and_effect_readback() -> None:
     assert mismatch.conflict is ConflictKind.MUTATION_EFFECT_MISMATCH
     assert missing.conflict is ConflictKind.MUTATION_EFFECT_MISMATCH
     assert passed.allowed
+
+
+def test_precondition_gate_can_run_before_external_effect() -> None:
+    cfg = config()
+    intent = WriteIntent(
+        "effect:1",
+        "pull_request",
+        "70",
+        "ready",
+        (("head", "abc"), ("draft", "true")),
+        (("draft", "false"),),
+        "effect:1",
+    )
+
+    passed = validate_preconditions(
+        intent,
+        {"head": "abc", "draft": "true"},
+        config=cfg,
+    )
+    stale = validate_preconditions(
+        intent,
+        {"head": "def", "draft": "true"},
+        config=cfg,
+    )
+
+    assert passed.allowed
+    assert stale.conflict is ConflictKind.STALE_WRITE_GATE
 
 
 def test_write_gate_rejects_noop_and_content_without_exact_identity() -> None:
