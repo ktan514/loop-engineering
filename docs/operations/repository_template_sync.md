@@ -49,7 +49,12 @@
 - `README.md`
   - 開発規約の正本への入口だけを追加する。
 - `docs/architecture/v2/commit_message_language_policy.md`
-  - Repository固有言語規約の参照先を`AGENTS.md`から`docs/REPOSITORY_RULES.md`へ変更する。
+  - Repository固有言語規約の参照先を`AGENTS.md`から共通規約・固有規約へ変更する。
+- `docs/operations/github_workflow.md`
+  - Issue本文の日程fallback記載を廃止し、Project fieldを唯一の計画日程Authorityにする。
+- `docs/architecture/v2/project_v2_management_spec.md`
+  - Issue本文の日程fallback記載を廃止する。
+  - 文章言語規約の参照先を新しい共通規約・固有規約へ変更する。
 
 ## 4. 維持するRepository固有規約
 
@@ -81,6 +86,8 @@ Project fieldで管理する次の値はIssue本文へ重複記録しない。
 - Start date
 - Target date
 - Assignees
+
+既存のRepository正本文書にもIssue本文の日程をfallback Authorityとして残さない。Projectを使用する`loop-engineering`では`Start date` / `Target date` fieldを計画日程の正本とする。
 
 既存Issue本文は履歴として一括書換えしない。新規作成・通常更新から標準書式を適用する。
 
@@ -122,10 +129,11 @@ Repository変更では次を確認する。
 3. 現行`AGENTS.md`の固有ルールが`REPOSITORY_RULES.md`へ失われず移っている。
 4. commit/branch命名規則に矛盾がない。
 5. Issue / PR templateがRepositoryに存在する。
-6. 既存CI workflowを削除・上書きしていない。
-7. Ruff、strict Mypy、全pytest、compileall、diff-checkのexact-head CIがPASSする。
-8. PR統合後にbranch protectionをowner権限で適用し、live readbackする。
-9. Project #10の同期未完了状態をDoneとして隠さない。
+6. Project field管理値をIssue本文へ重複するRepository正本が残っていない。
+7. 既存CI workflowを削除・上書きしていない。
+8. Ruff、strict Mypy、全pytest、compileall、diff-checkのexact-head CIがPASSする。
+9. PR統合後にbranch protectionをowner権限で適用し、live readbackする。
+10. Project #10の同期未完了状態をDoneとして隠さない。
 
 ## 9. 非対象
 
