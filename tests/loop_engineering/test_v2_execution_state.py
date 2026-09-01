@@ -73,6 +73,8 @@ def test_migration_records_work_and_cutover_in_one_transaction() -> None:
     assert "loop_v2_cutovers" in sql
     assert "PLANNED" in sql
     assert "ON CONFLICT (identity) DO NOTHING" in sql
+    assert "SELECT identity FROM inserted_work UNION ALL" in sql
+    assert "EXISTS (SELECT 1 FROM recorded_cutover)" in sql
 
 
 def test_packet_plan_is_typed_and_idempotency_depends_on_generation() -> None:
