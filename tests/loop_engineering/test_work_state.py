@@ -144,6 +144,7 @@ def test_task_packet_and_pending_effects_are_recovered_from_db() -> None:
                 {
                     "idempotency_key": "effect:62:1",
                     "work_identity": record().identity,
+                    "packet_generation": 1,
                     "kind": "PUSH",
                     "target_identity": "branch:feature/v2",
                     "status": "UNCERTAIN",
@@ -165,6 +166,7 @@ def test_task_packet_and_pending_effects_are_recovered_from_db() -> None:
     assert recovered.checkpoint is not None
     assert recovered.checkpoint.resumable_state == "IMPLEMENT_PENDING"
     assert recovered.pending_effects[0].status == "UNCERTAIN"
+    assert recovered.pending_effects[0].packet_generation == 1
     assert recovered.pending_effects[0].expected_preconditions == (("head", "before"),)
     assert recovered.pending_effects[0].expected_effect == (("head", "after"),)
 
@@ -195,6 +197,7 @@ def test_effect_intent_is_idempotent_and_readback_can_settle_uncertain() -> None
         kind="MERGE",
         target_identity="pr:63",
         status="INTENT_RECORDED",
+        packet_generation=1,
         expected_preconditions=(("head", "abc"), ("base", "main"), ("state", "OPEN")),
         expected_effect=(("state", "MERGED"),),
     )
@@ -205,11 +208,38 @@ def test_effect_intent_is_idempotent_and_readback_can_settle_uncertain() -> None
 
     written = "\n".join(database.statements)
     assert "ON CONFLICT (idempotency_key) DO NOTHING" in written
+    assert "packet_generation" in written
     assert "expected_preconditions" in written
     assert "expected_effect" in written
     assert "AND status IN ('INTENT_RECORDED', 'UNCERTAIN')" in written
     assert "UNCERTAIN" in written
     assert "CONFIRMED" in written
+
+
+def test_new_effect_intent_requires_packet_generation_and_expectations() -> None:
+    store = PostgreSQLWorkStateStore(Database())
+    missing_generation = EffectAttempt(
+        "effect:legacy",
+        record().identity,
+        "PUSH",
+        "branch:feature/v2",
+        "INTENT_RECORDED",
+        expected_preconditions=(("head", "before"),),
+        expected_effect=(("head", "after"),),
+    )
+    with pytest.raises(WorkStateUnavailable, match="EFFECT_INTENT_INVALID"):
+        store.record_effect_intent(missing_generation)
+
+    missing_expectation = EffectAttempt(
+        "effect:empty",
+        record().identity,
+        "PUSH",
+        "branch:feature/v2",
+        "INTENT_RECORDED",
+        packet_generation=1,
+    )
+    with pytest.raises(WorkStateUnavailable, match="EFFECT_INTENT_INVALID"):
+        store.record_effect_intent(missing_expectation)
 
 
 def test_issue_report_is_outbox_and_requires_bounded_body() -> None:
@@ -229,6 +259,7 @@ def test_issue_report_is_outbox_and_requires_bounded_body() -> None:
     assert "loop_issue_report_outbox" in written
     assert "'PENDING'" in written
     assert "'PUBLISHED'" in written
+    assert "ON CONFLICT DO NOTHING" in written
     with pytest.raises(WorkStateUnavailable, match="ISSUE_REPORT_INVALID"):
         store.enqueue_issue_report(
             identity="report:too-long",
@@ -291,6 +322,7 @@ def test_packet_intent_checkpoint_and_work_lease_are_one_transaction() -> None:
         kind="PUSH",
         target_identity="branch:feature/v2",
         status="INTENT_RECORDED",
+        packet_generation=2,
         expected_preconditions=(("head", "before"),),
         expected_effect=(("head", "after"),),
     )
@@ -321,12 +353,46 @@ def test_packet_intent_checkpoint_and_work_lease_are_one_transaction() -> None:
     assert "loop_work_checkpoints" in transaction
     assert "'INTENT_RECORDED'" in transaction
     assert "'EFFECT_PENDING'" in transaction
+    assert "packet_generation" in transaction
     assert "expected_preconditions" in transaction
     assert "expected_effect" in transaction
     assert "status IN ('INTENT_RECORDED', 'UNCERTAIN')" in transaction
     assert transaction.count("ON CONFLICT") == 1
     assert "ON CONFLICT (identity) DO NOTHING" not in transaction
     assert "ON CONFLICT (idempotency_key) DO NOTHING" not in transaction
+
+
+def test_transaction_rejects_effect_from_different_packet_generation() -> None:
+    store = PostgreSQLWorkStateStore(Database(transaction_result={"acquired": True}))
+    packet = WorkTaskPacket("packet:62:2", record().identity, 2, "IMPLEMENT", "STARTED")
+    effect = EffectAttempt(
+        "effect:62:old",
+        record().identity,
+        "PUSH",
+        "branch:feature/v2",
+        "INTENT_RECORDED",
+        packet_generation=1,
+        expected_preconditions=(("head", "before"),),
+        expected_effect=(("head", "after"),),
+    )
+    checkpoint = WorkCheckpoint(
+        "checkpoint:62:3",
+        record().identity,
+        "run:3",
+        "EFFECT_PENDING",
+        "EFFECT_INTENT_RECORDED",
+        "外部効果を実行する",
+        task_packet_identity=packet.identity,
+    )
+
+    with pytest.raises(WorkStateUnavailable, match="TRANSACTION_PACKET_INVALID"):
+        store.issue_packet_transaction(
+            record=record(),
+            lease=WorkLease(record().identity, "run:3", 2, 300),
+            packet=packet,
+            effect=effect,
+            checkpoint=checkpoint,
+        )
 
 
 def test_lease_conflict_never_issues_packet_or_starts_external_effect() -> None:
@@ -339,6 +405,7 @@ def test_lease_conflict_never_issues_packet_or_starts_external_effect() -> None:
         "PUSH",
         "branch:feature/v2",
         "INTENT_RECORDED",
+        packet_generation=2,
         expected_preconditions=(("head", "before"),),
         expected_effect=(("head", "after"),),
     )
@@ -373,6 +440,7 @@ def test_failed_transaction_leaves_no_partial_packet_state() -> None:
         "PUSH",
         "branch:feature/v2",
         "INTENT_RECORDED",
+        packet_generation=2,
         expected_preconditions=(("head", "before"),),
         expected_effect=(("head", "after"),),
     )
