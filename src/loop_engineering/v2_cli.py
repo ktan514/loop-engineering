@@ -7,7 +7,6 @@ import json
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 
 from .config import LoopEngineeringSettings
 from .postgres_runtime import PostgreSQLCommandAdapter
@@ -56,14 +55,21 @@ def add_v2_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="WORK_IDENTITY",
         help="指定済みV2 Workの既存packetを最大1遷移だけ処理する。",
     )
-    parser.add_argument("--v2-generation", type=int, help="発行するpacket generation。1以上を明示する。")
+    parser.add_argument(
+        "--v2-generation",
+        type=int,
+        help="発行するpacket generation。1以上を明示する。",
+    )
     parser.add_argument("--v2-transition", help="発行するpacketの遷移識別子。")
     parser.add_argument(
         "--v2-effect-kind",
         choices=("PUSH", "READY", "MERGE", "ISSUE_UPDATE"),
         help="発行するpacketの外部effect種別。",
     )
-    parser.add_argument("--v2-target", help="branch:/pr:/issue:形式の型付き外部対象identity。")
+    parser.add_argument(
+        "--v2-target",
+        help="branch:/pr:/issue:形式の型付き外部対象identity。",
+    )
     parser.add_argument(
         "--v2-before",
         action="append",
@@ -95,6 +101,11 @@ def v2_requested(arguments: argparse.Namespace) -> bool:
             arguments.v2_once is not None,
         )
     )
+
+
+def v2_arguments_present(arguments: argparse.Namespace) -> bool:
+    """V2 command本体またはV2専用補助引数が1つでも指定されたかを返す。"""
+    return v2_requested(arguments) or _packet_arguments_present(arguments)
 
 
 def run_v2_command(
@@ -145,7 +156,10 @@ def run_v2_command(
         try:
             generation = _required_generation(arguments.v2_generation)
             transition = _required_text(arguments.v2_transition, "V2_TRANSITION_REQUIRED")
-            effect_kind = _required_text(arguments.v2_effect_kind, "V2_EFFECT_KIND_REQUIRED")
+            effect_kind = _required_text(
+                arguments.v2_effect_kind,
+                "V2_EFFECT_KIND_REQUIRED",
+            )
             target = _required_text(arguments.v2_target, "V2_TARGET_REQUIRED")
             before = _parse_pairs(arguments.v2_before)
             after = _parse_pairs(arguments.v2_after)
@@ -174,7 +188,10 @@ def run_v2_command(
         return _print_blocked("V2_PACKET_ARGUMENT_WITH_ONCE")
     result = components.host.run_once(work_identity)
     print(result.as_json())
-    if result.status in {V2HostStatus.TRANSITION_COMPLETED, V2HostStatus.WORK_COMPLETED}:
+    if result.status in {
+        V2HostStatus.TRANSITION_COMPLETED,
+        V2HostStatus.WORK_COMPLETED,
+    }:
         return 0
     if result.status is V2HostStatus.WAITING:
         return 2
@@ -216,7 +233,10 @@ def _components(
         settings.workspace_path,
         production_environment(environment),
     )
-    definitions = GitHubWorkDefinitionAdapter(command_runner, settings.engine.project_number)
+    definitions = GitHubWorkDefinitionAdapter(
+        command_runner,
+        settings.engine.project_number,
+    )
     readback = GitHubEffectReadbackAdapter(command_runner, settings.engine.repository)
     operations = V2MigrationAndIssuanceService(
         settings.engine.repository,
