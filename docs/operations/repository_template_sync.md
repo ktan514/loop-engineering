@@ -55,6 +55,9 @@
 - `docs/architecture/v2/project_v2_management_spec.md`
   - Issue本文の日程fallback記載を廃止する。
   - 文章言語規約の参照先を新しい共通規約・固有規約へ変更する。
+- `docs/operations/github_project_management.md`
+  - Issue本文の日程fallback記載を廃止する。
+  - 文章言語規約の参照先を新しい共通規約・固有規約へ変更する。
 
 ## 4. 維持するRepository固有規約
 
