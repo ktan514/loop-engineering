@@ -64,6 +64,7 @@ class EffectAttempt:
     target_identity: str
     status: str
     request_identity: str | None = None
+    packet_generation: int | None = None
     expected_preconditions: tuple[tuple[str, str], ...] = ()
     expected_effect: tuple[tuple[str, str], ...] = ()
 
@@ -183,15 +184,21 @@ class PostgreSQLWorkStateStore:
         return _work_checkpoint(rows[0])
 
     def record_effect_intent(self, attempt: EffectAttempt) -> bool:
-        if attempt.status != "INTENT_RECORDED":
+        if (
+            attempt.status != "INTENT_RECORDED"
+            or attempt.packet_generation is None
+            or attempt.packet_generation < 1
+            or not attempt.expected_preconditions
+            or not attempt.expected_effect
+        ):
             raise WorkStateUnavailable("EFFECT_INTENT_INVALID")
         self._execute(
             "INSERT INTO loop_effect_attempts "
-            "(idempotency_key, work_identity, kind, target_identity, status, "
+            "(idempotency_key, work_identity, packet_generation, kind, target_identity, status, "
             "request_identity, expected_preconditions, expected_effect) VALUES ("
             f"{_literal(attempt.idempotency_key)}, {_literal(attempt.work_identity)}, "
-            f"{_literal(attempt.kind)}, {_literal(attempt.target_identity)}, "
-            "'INTENT_RECORDED', "
+            f"{attempt.packet_generation}, {_literal(attempt.kind)}, "
+            f"{_literal(attempt.target_identity)}, 'INTENT_RECORDED', "
             f"{_nullable_literal(attempt.request_identity)}, "
             f"{_pairs_json_literal(attempt.expected_preconditions)}, "
             f"{_pairs_json_literal(attempt.expected_effect)}) "
@@ -233,6 +240,9 @@ class PostgreSQLWorkStateStore:
             or checkpoint.task_packet_identity != packet.identity
             or packet.status != "STARTED"
             or effect.status != "INTENT_RECORDED"
+            or effect.packet_generation != packet.generation
+            or not effect.expected_preconditions
+            or not effect.expected_effect
             or checkpoint.checkpoint_kind != "EFFECT_PENDING"
             or packet.generation != lease.packet_generation
             or lease.packet_generation < 1
@@ -277,7 +287,7 @@ class PostgreSQLWorkStateStore:
             "(identity, work_identity, status, report_kind, checkpoint_identity, body) VALUES ("
             f"{_literal(identity)}, {_literal(work_identity)}, 'PENDING', {_literal(report_kind)}, "
             f"{_nullable_literal(checkpoint_identity)}, {_literal(body)}) "
-            "ON CONFLICT (identity) DO NOTHING"
+            "ON CONFLICT DO NOTHING"
         )
 
     def pending_issue_reports(self, work_identity: str) -> tuple[IssueReportOutboxItem, ...]:
@@ -349,8 +359,8 @@ class PostgreSQLWorkStateStore:
 
     def _pending_effects(self, work_identity: str) -> tuple[EffectAttempt, ...]:
         rows = self._query(
-            "SELECT idempotency_key, work_identity, kind, target_identity, status, "
-            "request_identity, expected_preconditions, expected_effect "
+            "SELECT idempotency_key, work_identity, packet_generation, kind, target_identity, "
+            "status, request_identity, expected_preconditions, expected_effect "
             "FROM loop_effect_attempts "
             f"WHERE work_identity = {_literal(work_identity)} "
             "AND status IN ('INTENT_RECORDED', 'UNCERTAIN') ORDER BY recorded_at ASC"
@@ -363,6 +373,7 @@ class PostgreSQLWorkStateStore:
                 target_identity=_required_string(row, "target_identity"),
                 status=_required_string(row, "status"),
                 request_identity=_optional_string(row, "request_identity"),
+                packet_generation=_optional_positive_int(row, "packet_generation"),
                 expected_preconditions=_string_pairs(row, "expected_preconditions"),
                 expected_effect=_string_pairs(row, "expected_effect"),
             )
@@ -424,6 +435,15 @@ def _required_string(row: dict[str, object], name: str) -> str:
 def _optional_string(row: dict[str, object], name: str) -> str | None:
     value = row.get(name)
     return value if isinstance(value, str) else None
+
+
+def _optional_positive_int(row: dict[str, object], name: str) -> int | None:
+    value = row.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, int) or value < 1:
+        raise WorkStateUnavailable("WORK_STATE_ROW_INVALID")
+    return value
 
 
 def _string_tuple(row: dict[str, object], name: str) -> tuple[str, ...]:
@@ -491,6 +511,9 @@ def _issue_packet_transaction_sql(
         f"WHERE work_identity = {_literal(record.identity)} "
         "AND status IN ('INTENT_RECORDED', 'UNCERTAIN')"
     )
+    packet_generation = effect.packet_generation
+    if packet_generation is None:
+        raise WorkStateUnavailable("EFFECT_INTENT_INVALID")
     return (
         "WITH eligible AS ("
         "SELECT identity FROM loop_work_records "
@@ -527,10 +550,11 @@ def _issue_packet_transaction_sql(
         "RETURNING identity"
         "), recorded_effect AS ("
         "INSERT INTO loop_effect_attempts "
-        "(idempotency_key, work_identity, kind, target_identity, status, request_identity, "
-        "expected_preconditions, expected_effect) SELECT "
+        "(idempotency_key, work_identity, packet_generation, kind, target_identity, status, "
+        "request_identity, expected_preconditions, expected_effect) SELECT "
         f"{_literal(effect.idempotency_key)}, {_literal(effect.work_identity)}, "
-        f"{_literal(effect.kind)}, {_literal(effect.target_identity)}, 'INTENT_RECORDED', "
+        f"{packet_generation}, {_literal(effect.kind)}, {_literal(effect.target_identity)}, "
+        "'INTENT_RECORDED', "
         f"{_nullable_literal(effect.request_identity)}, "
         f"{_pairs_json_literal(effect.expected_preconditions)}, "
         f"{_pairs_json_literal(effect.expected_effect)} FROM recorded_packet "
