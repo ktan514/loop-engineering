@@ -66,6 +66,7 @@ def attempt(
         kind=kind,
         target_identity=target,
         status=status,
+        packet_generation=1,
         expected_preconditions=before,
         expected_effect=after,
     )
@@ -189,6 +190,7 @@ def test_missing_expectations_report_kind_and_command_failure_fail_closed() -> N
         "PUSH",
         "branch:feature/v2",
         "UNCERTAIN",
+        packet_generation=1,
     )
     runner = Runner([])
     assert GitHubEffectReadbackAdapter(runner, record().repository).readback(
@@ -251,6 +253,26 @@ def test_new_outbox_report_is_marked_only_after_post_readback() -> None:
     assert len(runner.calls) == 3
     assert "--method" in runner.calls[1]
     assert marker in " ".join(runner.calls[1])
+
+
+def test_invalid_outbox_body_never_reads_or_posts_github() -> None:
+    invalid = IssueReportOutboxItem(
+        "report:66:invalid",
+        record().identity,
+        "PROGRESS",
+        "checkpoint:66:invalid",
+        "",
+    )
+    runner = Runner([])
+    state = ReportState((invalid,))
+
+    result = GitHubIssueReportPublisher(runner, state).publish_pending(record())
+
+    assert result.attempted == 1
+    assert result.published == 0
+    assert result.pending == 1
+    assert state.published == []
+    assert runner.calls == []
 
 
 def test_post_or_readback_failure_leaves_outbox_pending() -> None:
