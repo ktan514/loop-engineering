@@ -71,7 +71,9 @@ field ID / option ID / item IDを保存値から推測しない。変更前にli
 
 `Ready` / `In progress`へ進むIssueには`Start date` / `Target date`を設定する。
 
-日程は計画情報であり、品質Gateを緩める理由にしない。Project fieldが利用可能ならProject側を日程の正本とし、Issue本文の予定日はfallback・移行証拠として扱う。
+日程は計画情報であり、品質Gateを緩める理由にしない。GitHub Project `loop-engineering` の`Start date` / `Target date`を計画日程の正本とし、Issue本文へ同じ予定日を重複記載しない。
+
+既存Issue本文に残る予定日は履歴・移行証拠としてのみ扱い、現在計画のAuthorityに使用しない。
 
 ## 8. Verification
 
@@ -125,6 +127,6 @@ field ID / option ID / item IDを保存値から推測しない。変更前にli
 
 ## 12. 文章言語
 
-`AGENTS.md`と`docs/architecture/v2/commit_message_language_policy.md`に従う。
+`docs/GITHUB_OPERATION_RULES.md`、`docs/REPOSITORY_RULES.md`、`docs/architecture/v2/commit_message_language_policy.md`に従う。
 
 人間向け文章とcommit messageは日本語を基本とし、機械識別子・固定値は維持する。

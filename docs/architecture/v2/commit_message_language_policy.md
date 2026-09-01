@@ -3,7 +3,8 @@
 状態: 統合正本
 適用日: 2026-08-29
 関連正本:
-- `AGENTS.md`
+- `docs/GITHUB_OPERATION_RULES.md`
+- `docs/REPOSITORY_RULES.md`
 - `docs/architecture/v2/project_v2_management_spec.md`
 - `docs/architecture/v2/branch_lifecycle_and_commit_hygiene.md`
 
