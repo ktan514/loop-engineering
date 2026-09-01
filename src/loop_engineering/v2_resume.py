@@ -86,7 +86,10 @@ class V2ResumeCoordinator:
         checkpoint = recovered.checkpoint
         if packet is None or checkpoint is None:
             return V2ResumeResult(V2ResumeStatus.BLOCKED, "WORK_RECOVERY_MISSING", recovered)
-        if any(attempt.packet_generation != packet.generation for attempt in recovered.pending_effects):
+        if any(
+            attempt.packet_generation != packet.generation
+            for attempt in recovered.pending_effects
+        ):
             return V2ResumeResult(
                 V2ResumeStatus.RECONCILE_REQUIRED,
                 "EFFECT_PACKET_MISMATCH",
