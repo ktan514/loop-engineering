@@ -58,7 +58,9 @@ class ProductDevelopmentRegistration:
             raise PlanningValidationError("REGISTRATION_IDENTITY_INVALID")
         if not self.workspace_canonical_path.is_absolute():
             raise PlanningValidationError("REGISTRATION_WORKSPACE_INVALID")
-        if not self.acceptance_criteria or any(not item.strip() for item in self.acceptance_criteria):
+        if not self.acceptance_criteria or any(
+            not item.strip() for item in self.acceptance_criteria
+        ):
             raise PlanningValidationError("REGISTRATION_ACCEPTANCE_INVALID")
         if self.self_improvement_target is not None and "/" not in self.self_improvement_target:
             raise PlanningValidationError("REGISTRATION_IMPROVEMENT_TARGET_INVALID")
