@@ -219,6 +219,8 @@ class GitHubIssueReportPublisher:
         record: WorkRecord,
         report: IssueReportOutboxItem,
     ) -> IssueReportPublishStatus:
+        if not report.body or len(report.body) > 4000:
+            return IssueReportPublishStatus.PENDING
         marker = _report_marker(report.identity)
         try:
             comments = self._comments(record)
