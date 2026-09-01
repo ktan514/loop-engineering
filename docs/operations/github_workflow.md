@@ -31,11 +31,11 @@ chat summary / memoryをcurrent branch/PR/headの正本にしない。
 
 ## 4. Dates
 
-Ready/In progressへ進むIssueにはStart/Target dateを持たせる。
+Ready/In progressへ進むIssueにはProjectの`Start date` / `Target date`を持たせる。
 
 日付はplanning情報であり、品質Gateを緩める理由にしない。
 
-Project fieldsが利用可能ならProject側を日程の正本とし、Issue本文の日付はfallback/plan snapshotとして扱う。
+GitHub Project `loop-engineering` の`Start date` / `Target date`を計画日程の正本とし、Issue本文へ同じ予定日を重複記載しない。既存Issue本文に残る日付は履歴として扱い、現在計画のAuthorityに使用しない。
 
 ## 5. Branch strategy
 
