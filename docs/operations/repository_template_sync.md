@@ -26,9 +26,11 @@
 
 雛形の`README.md`は「テンプレートRepositoryそのもの」の説明なのでコピーしない。`loop-engineering`のREADMEは製品READMEとして維持する。
 
+同期元ファイルに末尾空白等、`loop-engineering`の既存品質Gate `git diff --check`へ違反する表記がある場合は、意味・見出し・書式構造を変更せず空白だけを正規化する。byte単位の一致より、共通規約の意味とRepository品質Gateの両立を優先する。
+
 ## 3. 同期対象
 
-### 3.1 雛形からそのまま同期するファイル
+### 3.1 雛形から内容を同期するファイル
 
 - `docs/GITHUB_OPERATION_RULES.md`
 - `.github/ISSUE_TEMPLATE/01_work.md`
@@ -38,6 +40,8 @@
 - `.github/copilot-instructions.md`
 - `CONTRIBUTING.md`
 - `scripts/apply-repository-settings.sh`
+
+Issue / PR templateに存在する末尾空白は、既存CIへ適合させるため除去してよい。
 
 ### 3.2 雛形構造へ合わせて更新するファイル
 
@@ -127,7 +131,7 @@ Project #10のlive stateを取得できる操作経路が用意された時点�
 
 Repository変更では次を確認する。
 
-1. 雛形から同期対象としたファイル内容が同期元commitと一致する。
+1. 雛形から同期対象としたファイルの意味・見出し・書式構造が同期元commitと一致し、差異が必要な場合はRepository品質Gateのための空白正規化だけである。
 2. `AGENTS.md`から共通規約・固有規約へ到達できる。
 3. 現行`AGENTS.md`の固有ルールが`REPOSITORY_RULES.md`へ失われず移っている。
 4. commit/branch命名規則に矛盾がない。
