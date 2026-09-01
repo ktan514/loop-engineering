@@ -59,7 +59,9 @@ class Operations:
         return self.migration_result
 
     def issue_packet(self, **kwargs: object) -> V2OperationResult:
-        self.issues.append((str(kwargs["work_identity"]), int(kwargs["generation"])))
+        generation = kwargs["generation"]
+        assert isinstance(generation, int)
+        self.issues.append((str(kwargs["work_identity"]), generation))
         return self.issue_result
 
 
