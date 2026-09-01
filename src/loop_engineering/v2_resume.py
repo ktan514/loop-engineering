@@ -81,6 +81,15 @@ class V2ResumeCoordinator:
         recovered = self._recovery.recover(work_identity)
         if recovered is None or not _complete_recovery(recovered):
             return V2ResumeResult(V2ResumeStatus.BLOCKED, "WORK_RECOVERY_MISSING", recovered)
+        packet = recovered.task_packet
+        if packet is None or any(
+            attempt.packet_generation != packet.generation for attempt in recovered.pending_effects
+        ):
+            return V2ResumeResult(
+                V2ResumeStatus.RECONCILE_REQUIRED,
+                "EFFECT_PACKET_MISMATCH",
+                recovered,
+            )
 
         definition = self._definitions.synchronize(recovered.record)
         if definition.status is WorkDefinitionStatus.DEPENDENCY_PENDING:
