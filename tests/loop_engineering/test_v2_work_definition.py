@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -19,23 +20,57 @@ class Runner:
         return self.output
 
 
+@dataclass
+class FailingRunner:
+    calls: list[Sequence[str]]
+
+    def run(self, args: Sequence[str]) -> str:
+        self.calls.append(args)
+        raise subprocess.CalledProcessError(1, tuple(args))
+
+
 def record() -> WorkRecord:
     return WorkRecord("work:repo:65", "ktan514/loop-engineering", 65, "old", "SELECTED")
 
 
 def test_synchronizes_only_typed_issue_and_project_fields() -> None:
     payload = {
-        "data": {"repository": {"issue": {
-            "number": 65, "state": "OPEN", "updatedAt": "2026-08-31T00:00:00Z",
-            "body": "この本文は読まない",
-            "projectItems": {"nodes": [{"project": {"number": 9}, "fieldValues": {"nodes": [
-                {"field": {"name": "Status"}, "name": "In Progress"},
-                {"field": {"name": "Priority"}, "name": "P1"},
-                {"field": {"name": "Start date"}, "date": "2026-09-02"},
-                {"field": {"name": "Acceptance criteria digest"}, "name": "sha256:abc"},
-            ]}}]},
-            "blockedBy": {"nodes": [], "pageInfo": {"hasNextPage": False}},
-        }}}}
+        "data": {
+            "repository": {
+                "issue": {
+                    "number": 65,
+                    "state": "OPEN",
+                    "updatedAt": "2026-08-31T00:00:00Z",
+                    "body": "この本文は読まない",
+                    "projectItems": {
+                        "nodes": [
+                            {
+                                "project": {"number": 9},
+                                "fieldValues": {
+                                    "nodes": [
+                                        {
+                                            "field": {"name": "Status"},
+                                            "name": "In Progress",
+                                        },
+                                        {"field": {"name": "Priority"}, "name": "P1"},
+                                        {
+                                            "field": {"name": "Start date"},
+                                            "date": "2026-09-02",
+                                        },
+                                        {
+                                            "field": {"name": "Acceptance criteria digest"},
+                                            "name": "sha256:abc",
+                                        },
+                                    ]
+                                },
+                            }
+                        ]
+                    },
+                    "blockedBy": {"nodes": [], "pageInfo": {"hasNextPage": False}},
+                }
+            }
+        }
+    }
     runner = Runner(json.dumps(payload), [])
 
     actual = GitHubWorkDefinitionAdapter(runner, 9).synchronize(record())
@@ -51,23 +86,74 @@ def test_synchronizes_only_typed_issue_and_project_fields() -> None:
     assert "comments" not in command
 
 
-def test_closed_or_missing_project_is_unavailable() -> None:
-    closed = {"data": {"repository": {"issue": {
-        "number": 65, "state": "CLOSED", "updatedAt": "2026-08-31T00:00:00Z",
-        "projectItems": {"nodes": []},
-    }}}}
+def test_closed_issue_is_typed_before_project_requirement() -> None:
+    closed = {
+        "data": {
+            "repository": {
+                "issue": {
+                    "number": 65,
+                    "state": "CLOSED",
+                    "updatedAt": "2026-08-31T00:00:00Z",
+                    "projectItems": {"nodes": []},
+                }
+            }
+        }
+    }
     adapter = GitHubWorkDefinitionAdapter(Runner(json.dumps(closed), []), 9)
+
     assert adapter.synchronize(record()).status is WorkDefinitionStatus.CLOSED_BEFORE_COMPLETION
+
+
+def test_missing_acceptance_criteria_digest_is_distinct_from_provider_failure() -> None:
+    issue = {
+        "number": 65,
+        "state": "OPEN",
+        "blockedBy": {"nodes": [], "pageInfo": {"hasNextPage": False}},
+        "projectItems": {
+            "nodes": [
+                {
+                    "project": {"number": 9},
+                    "fieldValues": {
+                        "nodes": [
+                            {"field": {"name": "Status"}, "name": "In Progress"},
+                        ],
+                        "pageInfo": {"hasNextPage": False},
+                    },
+                }
+            ]
+        },
+    }
+    payload = {"data": {"repository": {"issue": issue}}}
+
+    missing = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9).synchronize(record())
+    unavailable = GitHubWorkDefinitionAdapter(FailingRunner([]), 9).synchronize(record())
+
+    assert missing.status is WorkDefinitionStatus.ACCEPTANCE_CRITERIA_MISSING
+    assert unavailable.status is WorkDefinitionStatus.UNAVAILABLE
 
 
 def test_comment_updates_do_not_change_revision_and_open_dependency_waits() -> None:
     issue = {
-        "number": 65, "state": "OPEN",
-        "updatedAt": "comment-update-only", "parent": {"number": 62, "state": "CLOSED"},
+        "number": 65,
+        "state": "OPEN",
+        "updatedAt": "comment-update-only",
+        "parent": {"number": 62, "state": "CLOSED"},
         "blockedBy": {"nodes": [], "pageInfo": {"hasNextPage": False}},
-        "projectItems": {"nodes": [{"project": {"number": 9}, "fieldValues": {"nodes": [
-            {"field": {"name": "Acceptance criteria digest"}, "name": "sha256:abc"},
-        ]}}]},
+        "projectItems": {
+            "nodes": [
+                {
+                    "project": {"number": 9},
+                    "fieldValues": {
+                        "nodes": [
+                            {
+                                "field": {"name": "Acceptance criteria digest"},
+                                "name": "sha256:abc",
+                            },
+                        ]
+                    },
+                }
+            ]
+        },
     }
     payload = {"data": {"repository": {"issue": issue}}}
     first = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9).synchronize(record())
@@ -89,16 +175,34 @@ def test_text_digest_completed_closed_and_truncated_dependencies_are_safe() -> N
         "number": 65,
         "state": "OPEN",
         "blockedBy": {"nodes": [], "pageInfo": {"hasNextPage": False}},
-        "projectItems": {"nodes": [{"project": {"number": 9}, "fieldValues": {"nodes": [
-            {"field": {"name": "Acceptance criteria digest"}, "text": "digest:65"},
-        ]}}]},
+        "projectItems": {
+            "nodes": [
+                {
+                    "project": {"number": 9},
+                    "fieldValues": {
+                        "nodes": [
+                            {
+                                "field": {"name": "Acceptance criteria digest"},
+                                "text": "digest:65",
+                            },
+                        ]
+                    },
+                }
+            ]
+        },
     }
     payload = {"data": {"repository": {"issue": issue}}}
     result = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9).synchronize(record())
     assert result.status is WorkDefinitionStatus.READY
 
     issue["state"] = "CLOSED"
-    completed = WorkRecord("work:repo:65", "ktan514/loop-engineering", 65, "old", "COMPLETED")
+    completed = WorkRecord(
+        "work:repo:65",
+        "ktan514/loop-engineering",
+        65,
+        "old",
+        "COMPLETED",
+    )
     adapter = GitHubWorkDefinitionAdapter(Runner(json.dumps(payload), []), 9)
     assert adapter.synchronize(completed).status is WorkDefinitionStatus.COMPLETED
 
