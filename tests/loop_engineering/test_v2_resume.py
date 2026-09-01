@@ -73,17 +73,20 @@ class Recovery:
 @dataclass
 class Definitions:
     value: WorkRecord | None
+    status: WorkDefinitionStatus | None = None
     calls: int = 0
 
     def synchronize(self, current: WorkRecord) -> WorkDefinitionResult:
         assert current == record()
         self.calls += 1
-        status = (
-            WorkDefinitionStatus.READY
-            if self.value is not None
-            else WorkDefinitionStatus.UNAVAILABLE
-        )
-        return WorkDefinitionResult(status, self.value)
+        resolved_status = self.status
+        if resolved_status is None:
+            resolved_status = (
+                WorkDefinitionStatus.READY
+                if self.value is not None
+                else WorkDefinitionStatus.UNAVAILABLE
+            )
+        return WorkDefinitionResult(resolved_status, self.value)
 
 
 @dataclass
@@ -129,6 +132,21 @@ def test_resume_is_ready_only_for_issued_packet_and_safe_checkpoint() -> None:
     assert result.detail == "RESUME_READY"
     assert recovery.synchronized == [record()]
     assert effects.calls == []
+
+
+def test_acceptance_criteria_digest_missing_is_typed_blocked() -> None:
+    recovery = Recovery(recovered())
+    definitions = Definitions(None, status=WorkDefinitionStatus.ACCEPTANCE_CRITERIA_MISSING)
+
+    result = V2ResumeCoordinator(
+        recovery,
+        definitions,
+        Effects(EffectReadbackStatus.CONFIRMED),
+    ).resume(record().identity)
+
+    assert result.status is V2ResumeStatus.BLOCKED
+    assert result.detail == "ACCEPTANCE_CRITERIA_DIGEST_MISSING"
+    assert recovery.synchronized == []
 
 
 def test_missing_or_inconsistent_recovery_stays_blocked_before_definition_sync() -> None:
