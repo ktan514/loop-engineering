@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from loop_engineering.v2_execution_state import (
+    V2ExecutionPacket,
     V2ExecutionStateStore,
     build_packet_plan,
     packet_identity,
@@ -123,13 +124,6 @@ def test_issue_packet_creates_issued_packet_safe_checkpoint_and_pointers_atomica
 def test_start_packet_updates_existing_packet_and_records_lease_effect_checkpoint_once() -> None:
     database = Database(transaction_results=[{"started": True}])
     store = V2ExecutionStateStore(database)
-    issued = store.issue_packet  # 型検査でmethodを保持するだけ
-    del issued
-    packet = type("PacketFactory", (), {})
-    del packet
-
-    from loop_engineering.v2_execution_state import V2ExecutionPacket
-
     value = V2ExecutionPacket(
         packet_identity(record().identity, 1),
         record().identity,
@@ -137,10 +131,9 @@ def test_start_packet_updates_existing_packet_and_records_lease_effect_checkpoin
         "ISSUED",
         push_plan(),
     )
+
     result = store.start_packet(
-        record=WorkRecord(
-            **{**record().__dict__}  # type: ignore[attr-defined]
-        ),
+        record=record(lifecycle="RUNNING"),
         packet=value,
         safe_checkpoint_identity="checkpoint:safe",
         holder_identity="holder:1",
@@ -160,8 +153,6 @@ def test_start_packet_updates_existing_packet_and_records_lease_effect_checkpoin
 
 
 def test_finalize_requires_terminal_effect_and_maps_no_effect_to_superseded() -> None:
-    from loop_engineering.v2_execution_state import V2ExecutionPacket
-
     database = Database(
         query_results=[[{"status": "NO_EFFECT"}]],
         transaction_results=[
