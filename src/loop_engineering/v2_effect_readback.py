@@ -63,7 +63,7 @@ class GitHubEffectReadbackAdapter:
             if attempt.kind == "ISSUE_UPDATE":
                 return self._read_issue_update(attempt.target_identity, before, after)
             return EffectReadbackStatus.UNKNOWN
-        except (OSError, subprocess.SubprocessError, ValueError, json.JSONDecodeError):
+        except (OSError, subprocess.SubprocessError, ValueError):
             return EffectReadbackStatus.UNKNOWN
 
     def _read_push(
@@ -241,7 +241,7 @@ class GitHubIssueReportPublisher:
             readback = self._comments(record)
             if readback is not None and _contains_marker(readback, marker):
                 return IssueReportPublishStatus.PUBLISHED
-        except (OSError, subprocess.SubprocessError, ValueError, json.JSONDecodeError):
+        except (OSError, subprocess.SubprocessError, ValueError):
             return IssueReportPublishStatus.PENDING
         return IssueReportPublishStatus.PENDING
 
