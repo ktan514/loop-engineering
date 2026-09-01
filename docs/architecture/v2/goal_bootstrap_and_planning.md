@@ -28,6 +28,7 @@ Product側にWork Issue、branch、PR、TaskPacketが存在しない状態から
 - `acceptance_criteria[]`
 - `work_branch_template`
 - `ci_workflow_name`
+- `initial_project_status`
 - `human_verification_policy`
 - `self_improvement_target?`
 
@@ -76,9 +77,54 @@ mutation前に次をすべて検証する。
 
 不正proposalは外部effectへ変換しない。
 
-## 5. GitHub Planning Projection
+## 5. Bootstrap effect状態
+
+最初のIssue作成前にはGitHub Issue番号由来の`WorkRecord`が存在しないため、通常の`loop_effect_attempts.work_identity`へbootstrap mutationを記録できない。
+
+この不足を理由にGitHubへ直接mutationしてはならない。versioned migrationで`loop_bootstrap_effects`を追加し、Goal bootstrap専用のintent / readback / idempotency正本をPostgreSQLへ置く。
+
+最低限:
+
+```text
+loop_bootstrap_effects
+- idempotency_key PRIMARY KEY
+- product_key
+- repository
+- goal_revision
+- kind
+- target_identity
+- status: INTENT_RECORDED | CONFIRMED | NO_EFFECT | UNCERTAIN
+- expected_preconditions JSONB
+- expected_effect JSONB
+- request_identity?
+- confirmed_at?
+- recorded_at
+```
+
+bootstrap effectも通常V2 effectと同じ順序を守る。
+
+```text
+DB intent
+→ target限定fresh readback
+→ precondition検証
+→ mutation最大1回
+→ fresh readback
+→ DB outcome
+```
+
+command failure / timeout後に同じeffectを即再送しない。結果をreadbackできなければ`UNCERTAIN`として停止する。
+
+Goal / Work Issueが確定して通常`WorkRecord`を作成できる段階以降は、#62〜#67の通常V2 work/effect状態へ移行する。
+
+## 6. GitHub Planning Projection
 
 `PlanningProjectionPort.ensure_plan(registration, proposal)` はGitHub側の課題・Project構造を確立する。
+
+Goal管理Issueへ次のmarkerを埋め込む。
+
+```text
+<!-- loop-engineering-goal:{product_key}:{goal_revision} -->
+```
 
 Product Work Issue本文へmachine bootstrap identityとして次のHTML comment markerを1つだけ埋め込む。
 
@@ -86,17 +132,18 @@ Product Work Issue本文へmachine bootstrap identityとして次のHTML comment
 <!-- loop-engineering-work:{product_key}:{goal_revision}:{logical_key} -->
 ```
 
-このmarkerはbootstrap時の冪等identityであり、current Work / PR / HEAD / next transitionのAuthorityには使用しない。
+markerはbootstrap時の冪等identityであり、current Work / PR / HEAD / next transitionのAuthorityには使用しない。
 
 再bootstrap時はIssue一覧からmarker完全一致を検索し、既存Issueへ収束する。create commandが失敗・timeoutした場合も直ちに再作成せず、同markerをfresh readして存在確認する。
 
-## 6. Issue作成
+## 7. Issue作成
 
-Issue本文は人間向け情報と受入条件を保持する。
+Goal管理IssueはGoal原文、Goal acceptance criteria、proposal identityを人間向けに保持する。
 
-最低限:
+Work Issue本文は最低限次を持つ。
 
 - marker
+- Goal管理Issue参照
 - 目的
 - スコープ
 - 受入条件
@@ -106,18 +153,20 @@ Issue本文は人間向け情報と受入条件を保持する。
 
 日付、Status、Priority等、Project fieldを正本とする値を本文へ重複管理しない。
 
-## 7. Project登録
+## 8. Project登録
 
-Issueを指定Projectへ追加し、少なくとも次を設定する。
+Goal管理IssueとWork Issueを指定Projectへ追加する。
+
+Work Issueには少なくとも次を設定する。
 
 - `Acceptance criteria digest`: acceptance criteriaのcanonical SHA-256
-- `Status`: templateに存在する初期未着手optionを使用
+- `Status`: `initial_project_status`と一致するoption
 
-Project field / option identityは名前からfresh解決し、IDをPlatform coreへハードコードしない。必要fieldが無ければfail-closedする。
+Project field / option identityは名前からfresh解決し、IDをPlatform coreへハードコードしない。必要field・Status optionが無ければfail-closedする。
 
 Project item add / field update後はProject itemをfresh readbackし、対象Issue URL、field valueが一致することを確認する。
 
-## 8. Dependency
+## 9. Dependency
 
 Projection結果はlogical dependencyを`ProjectedWork.dependencies`として型付きで保持する。
 
@@ -125,38 +174,42 @@ GitHub native dependency mutationはprovider capabilityとして扱う。利用�
 
 production Completion Gateまでには、SchedulerがdependencyをGitHub planning stateからfresh取得できるprovider経路を完成させる。
 
-## 9. 冪等性
+## 10. 冪等性
 
-冪等key:
+冪等keyはeffect種別と次の論理identityから決定論的に生成する。
 
 ```text
-product_key + goal_revision + logical_key
+product_key + goal_revision + logical_key? + target role
 ```
 
 以下を二重作成しない。
 
-- Issue
+- Goal Issue
+- Work Issue
 - Project item
 - Project field updateの論理effect
 
 同markerのIssueが複数存在する場合は競合として停止し、どれかを推測採用しない。
 
-## 10. Self-Improvement境界
+## 11. Self-Improvement境界
 
 Product bootstrapのPlanning projectionはProduct Issueだけを作成する。
 
 Loop Engineering Platform自体の不具合・改善は`self_improvement_target`へ別系統で公開し、Product Repositoryへ汎用Platform改善Issueを混入させない。
 
-## 11. 実装構成
+## 12. 実装構成
 
 - `v2_goal_planning.py`
   - registration / plan model
   - proposal validator
   - deterministic fallback planner
   - bootstrap service
+- `v2_bootstrap_state.py`
+  - bootstrap専用PostgreSQL effect state
 - `v2_planning_projection.py`
   - GitHub Issue / Project projection adapter
-  - marker / digest / readback
+  - marker / digest / effect intent / readback
+- migration `0008_v2_bootstrap_effects.sql`
 - tests
   - proposal validation
   - cycle / duplicate / invalid dependency
@@ -164,10 +217,12 @@ Loop Engineering Platform自体の不具合・改善は`self_improvement_target`
   - duplicate marker conflict
   - create command failure後readback
   - Project field不足のfail-closed
+  - DB intent未確定ではmutation 0回
 
-## 12. 完了条件
+## 13. 完了条件
 
 - Product側に事前Issueが0件でもGoalからWork Planを生成できる。
+- 最初のIssue作成を含むbootstrap mutationがPostgreSQL intentを経由する。
 - 同Goal revisionを再bootstrapしても同一Issue / Project itemへ収束する。
 - Acceptance criteria digestをProjectへ投影できる。
 - Project field不足・duplicate marker・曖昧readbackではmutationを継続しない。
