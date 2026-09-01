@@ -137,10 +137,10 @@ class V2ExecutionStateStore:
         if generation < 1 or not run_identity:
             raise WorkStateUnavailable("V2_PACKET_ISSUE_INVALID")
         _validate_plan(plan)
-        packet_identity = packet_identity(record.identity, generation)
-        checkpoint_identity = _checkpoint_identity(packet_identity, "issued")
+        packet_identity_value = packet_identity(record.identity, generation)
+        checkpoint_identity = _checkpoint_identity(packet_identity_value, "issued")
         packet = V2ExecutionPacket(
-            packet_identity,
+            packet_identity_value,
             record.identity,
             generation,
             "ISSUED",
@@ -156,7 +156,7 @@ class V2ExecutionStateStore:
         )
         if result.get("issued") is True:
             return V2PacketIssueResult(packet, checkpoint_identity)
-        existing = self.packet(packet_identity)
+        existing = self.packet(packet_identity_value)
         if existing == packet:
             return V2PacketIssueResult(packet, checkpoint_identity, already_issued=True)
         return None
@@ -421,7 +421,10 @@ def _validate_plan(plan: V2PacketPlan) -> None:
         valid = False
     if not valid:
         raise WorkStateUnavailable("V2_PACKET_PLAN_INVALID")
-    if any(not value or "\x00" in value or len(value) > 1024 for value in plan.canonical_design_identities):
+    if any(
+        not value or "\x00" in value or len(value) > 1024
+        for value in plan.canonical_design_identities
+    ):
         raise WorkStateUnavailable("V2_PACKET_PLAN_INVALID")
 
 
@@ -448,8 +451,10 @@ def _issue_packet_sql(
         "SELECT 1 FROM loop_task_packets previous "
         "WHERE previous.identity = w.latest_task_packet_identity "
         "AND previous.status IN ('COMPLETED', 'SUPERSEDED'))) "
-        f"AND NOT EXISTS (SELECT 1 FROM loop_task_packets p WHERE p.identity = {_literal(packet.identity)} "
-        f"OR (p.work_identity = {_literal(packet.work_identity)} AND p.generation = {packet.generation}))"
+        "AND NOT EXISTS (SELECT 1 FROM loop_task_packets p "
+        f"WHERE p.identity = {_literal(packet.identity)} "
+        "OR (p.work_identity = "
+        f"{_literal(packet.work_identity)} AND p.generation = {packet.generation}))"
         "), recorded_packet AS ("
         "INSERT INTO loop_task_packets "
         "(identity, work_identity, generation, transition, status, canonical_design_identities, "
@@ -515,15 +520,18 @@ def _start_packet_sql(
         "AND NOT EXISTS (SELECT 1 FROM loop_effect_attempts e "
         "WHERE e.work_identity = w.identity "
         "AND e.status IN ('INTENT_RECORDED', 'UNCERTAIN')) "
-        f"AND NOT EXISTS (SELECT 1 FROM loop_effect_attempts e WHERE e.idempotency_key = {_literal(effect.idempotency_key)}) "
-        f"AND NOT EXISTS (SELECT 1 FROM loop_work_checkpoints c2 WHERE c2.identity = {_literal(pending_checkpoint_identity)})"
+        "AND NOT EXISTS (SELECT 1 FROM loop_effect_attempts e "
+        f"WHERE e.idempotency_key = {_literal(effect.idempotency_key)}) "
+        "AND NOT EXISTS (SELECT 1 FROM loop_work_checkpoints c2 "
+        f"WHERE c2.identity = {_literal(pending_checkpoint_identity)})"
         "), acquired AS ("
         "INSERT INTO loop_work_leases "
         "(work_identity, holder_identity, packet_generation, expires_at) SELECT "
         f"{_literal(record.identity)}, {_literal(holder_identity)}, {packet.generation}, "
         f"now() + INTERVAL '{lease_seconds} seconds' FROM eligible "
         "ON CONFLICT (work_identity) DO UPDATE SET "
-        "holder_identity = EXCLUDED.holder_identity, packet_generation = EXCLUDED.packet_generation, "
+        "holder_identity = EXCLUDED.holder_identity, "
+        "packet_generation = EXCLUDED.packet_generation, "
         "acquired_at = now(), expires_at = EXCLUDED.expires_at "
         "WHERE loop_work_leases.expires_at <= now() RETURNING work_identity"
         "), started_packet AS ("
@@ -534,16 +542,18 @@ def _start_packet_sql(
         "INSERT INTO loop_effect_attempts "
         "(idempotency_key, work_identity, packet_generation, kind, target_identity, status, "
         "request_identity, expected_preconditions, expected_effect) SELECT "
-        f"{_literal(effect.idempotency_key)}, {_literal(effect.work_identity)}, {packet.generation}, "
-        f"{_literal(effect.kind)}, {_literal(effect.target_identity)}, 'INTENT_RECORDED', NULL, "
+        f"{_literal(effect.idempotency_key)}, {_literal(effect.work_identity)}, "
+        f"{packet.generation}, {_literal(effect.kind)}, "
+        f"{_literal(effect.target_identity)}, 'INTENT_RECORDED', NULL, "
         f"{_json_pairs(effect.expected_preconditions)}, {_json_pairs(effect.expected_effect)} "
         "FROM started_packet RETURNING idempotency_key"
         "), recorded_checkpoint AS ("
         "INSERT INTO loop_work_checkpoints "
         "(identity, work_identity, run_identity, task_packet_identity, checkpoint_kind, "
         "resumable_state, next_action, external_target_identities, evidence_identities) SELECT "
-        f"{_literal(pending_checkpoint_identity)}, {_literal(record.identity)}, {_literal(run_identity)}, "
-        f"{_literal(packet.identity)}, 'EFFECT_PENDING', 'EFFECT_INTENT_RECORDED', "
+        f"{_literal(pending_checkpoint_identity)}, {_literal(record.identity)}, "
+        f"{_literal(run_identity)}, {_literal(packet.identity)}, "
+        "'EFFECT_PENDING', 'EFFECT_INTENT_RECORDED', "
         "'記録済み対象の外部効果を実行または読戻す', "
         f"{_json_array((plan.target_identity,))}, '[]'::jsonb FROM recorded_effect "
         "RETURNING identity"
@@ -565,8 +575,16 @@ def _finalize_packet_sql(
     checkpoint_identity: str,
     expected_effect_status: str,
 ) -> str:
-    checkpoint_kind = "EFFECT_CONFIRMED" if expected_effect_status == "CONFIRMED" else "EFFECT_NO_EFFECT"
-    resumable_state = "EFFECT_CONFIRMED" if expected_effect_status == "CONFIRMED" else "EFFECT_NO_EFFECT"
+    checkpoint_kind = (
+        "EFFECT_CONFIRMED"
+        if expected_effect_status == "CONFIRMED"
+        else "EFFECT_NO_EFFECT"
+    )
+    resumable_state = (
+        "EFFECT_CONFIRMED"
+        if expected_effect_status == "CONFIRMED"
+        else "EFFECT_NO_EFFECT"
+    )
     next_action = (
         "次の作業パケットを明示発行する"
         if expected_effect_status == "CONFIRMED"
@@ -597,10 +615,11 @@ def _finalize_packet_sql(
         "INSERT INTO loop_work_checkpoints "
         "(identity, work_identity, run_identity, task_packet_identity, checkpoint_kind, "
         "resumable_state, next_action, external_target_identities, evidence_identities) SELECT "
-        f"{_literal(checkpoint_identity)}, {_literal(packet.work_identity)}, {_literal(run_identity)}, "
-        f"{_literal(packet.identity)}, {_literal(checkpoint_kind)}, {_literal(resumable_state)}, "
-        f"{_literal(next_action)}, {_json_array((packet.plan.target_identity,))}, '[]'::jsonb "
-        "FROM finalized_packet RETURNING identity"
+        f"{_literal(checkpoint_identity)}, {_literal(packet.work_identity)}, "
+        f"{_literal(run_identity)}, {_literal(packet.identity)}, "
+        f"{_literal(checkpoint_kind)}, {_literal(resumable_state)}, "
+        f"{_literal(next_action)}, {_json_array((packet.plan.target_identity,))}, "
+        "'[]'::jsonb FROM finalized_packet RETURNING identity"
         "), updated_work AS ("
         "UPDATE loop_work_records SET "
         "lifecycle = CASE WHEN "
@@ -617,7 +636,8 @@ def _finalize_packet_sql(
         "'finalized', EXISTS (SELECT 1 FROM updated_work), "
         "'packet_status', (SELECT status FROM finalized_packet LIMIT 1), "
         f"'effect_status', {_literal(expected_effect_status)}, "
-        "'work_completed', COALESCE((SELECT lifecycle = 'COMPLETED' FROM updated_work LIMIT 1), false)"
+        "'work_completed', COALESCE((SELECT lifecycle = 'COMPLETED' "
+        "FROM updated_work LIMIT 1), false)"
         ")::text"
     )
 
