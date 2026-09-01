@@ -70,8 +70,17 @@ def checkpoint(*, kind: str = "SAFE_POINT", identity: str = "checkpoint:safe") -
     )
 
 
-def recovered(*, packet_status: str = "ISSUED", checkpoint_kind: str = "SAFE_POINT") -> RecoveredWork:
-    return RecoveredWork(record(), task_packet(status=packet_status), checkpoint(kind=checkpoint_kind), ())
+def recovered(
+    *,
+    packet_status: str = "ISSUED",
+    checkpoint_kind: str = "SAFE_POINT",
+) -> RecoveredWork:
+    return RecoveredWork(
+        record(),
+        task_packet(status=packet_status),
+        checkpoint(kind=checkpoint_kind),
+        (),
+    )
 
 
 @dataclass
