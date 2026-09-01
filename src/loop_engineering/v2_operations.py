@@ -105,7 +105,11 @@ class V2MigrationAndIssuanceService:
                     "MIGRATION_TRANSACTION_REJECTED",
                     work_identity,
                 )
-            if recorded is None or recorded.issue_revision != synchronized.issue_revision or not cutover:
+            if (
+                recorded is None
+                or recorded.issue_revision != synchronized.issue_revision
+                or not cutover
+            ):
                 return V2OperationResult(
                     V2OperationStatus.BLOCKED,
                     "MIGRATION_READBACK_MISMATCH",
