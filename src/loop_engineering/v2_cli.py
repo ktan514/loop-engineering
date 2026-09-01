@@ -143,8 +143,8 @@ def run_v2_command(
     if arguments.migrate_v2_work_state is not None:
         if _packet_arguments_present(arguments):
             return _print_blocked("V2_PACKET_ARGUMENT_WITH_MIGRATION")
-        result = components.operations.migrate_issue(arguments.migrate_v2_work_state)
-        return _print_operation(result)
+        operation_result = components.operations.migrate_issue(arguments.migrate_v2_work_state)
+        return _print_operation(operation_result)
 
     work_identity = arguments.issue_v2_packet or arguments.v2_once
     if not isinstance(work_identity, str) or not _valid_work_identity(
@@ -176,24 +176,24 @@ def run_v2_command(
             )
         except WorkStateUnavailable as error:
             return _print_blocked(str(error))
-        result = components.operations.issue_packet(
+        operation_result = components.operations.issue_packet(
             work_identity=work_identity,
             generation=generation,
             plan=plan,
             run_identity=f"run:packet-issue:{uuid.uuid4().hex}",
         )
-        return _print_operation(result)
+        return _print_operation(operation_result)
 
     if _packet_arguments_present(arguments):
         return _print_blocked("V2_PACKET_ARGUMENT_WITH_ONCE")
-    result = components.host.run_once(work_identity)
-    print(result.as_json())
-    if result.status in {
+    host_result = components.host.run_once(work_identity)
+    print(host_result.as_json())
+    if host_result.status in {
         V2HostStatus.TRANSITION_COMPLETED,
         V2HostStatus.WORK_COMPLETED,
     }:
         return 0
-    if result.status is V2HostStatus.WAITING:
+    if host_result.status is V2HostStatus.WAITING:
         return 2
     return 3
 
