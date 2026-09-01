@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import time
 from pathlib import Path
@@ -10,6 +11,12 @@ from .host_runtime import HostTransitionResult, HostTransitionStatus
 from .mission_goal import inject_mission_goal_environment
 from .operational_config import inject_operational_store_environment
 from .runtime_console import RuntimeConsole, VisibleSubprocessLocalRunner
+from .v2_cli import (
+    add_v2_arguments,
+    legacy_host_block_reason,
+    run_v2_command,
+    v2_requested,
+)
 
 _CI_RECHECK_INITIAL_SECONDS = 60.0
 _CI_RECHECK_MAX_SECONDS = 300.0
@@ -55,6 +62,7 @@ def main() -> int:
         action="store_true",
         help="永続実行ログに加えて、子プロセスの詳細出力を標準エラーにも表示する。",
     )
+    add_v2_arguments(parser)
     arguments = parser.parse_args()
     if arguments.version:
         print("loop_engineering 1")
@@ -86,6 +94,25 @@ def main() -> int:
         repository=settings.engine.repository,
         environment=environment,
     )
+
+    if v2_requested(arguments):
+        if any(
+            (
+                arguments.preflight,
+                arguments.migrate_operational_store,
+                arguments.operational_state_check,
+                arguments.once,
+            )
+        ):
+            print(json.dumps({"status": "BLOCKED", "detail": "V2_COMMAND_CONFLICT"}))
+            return 3
+        v2_exit = run_v2_command(
+            arguments,
+            settings=settings,
+            environment=environment,
+        )
+        if v2_exit is not None:
+            return v2_exit
 
     if arguments.migrate_operational_store:
         from .postgres_runtime import PostgreSQLCommandAdapter
@@ -136,6 +163,11 @@ def main() -> int:
         print(f"MISSION_GOAL_PATH = {environment.get('LOOP_MISSION_GOAL_PATH', '')}")
         print(preflight_result.as_json())
         return 3 if preflight_result.status is PreflightStatus.BLOCKED else 0
+
+    legacy_block = legacy_host_block_reason(settings=settings, environment=environment)
+    if legacy_block is not None:
+        print(json.dumps({"status": "BLOCKED", "detail": legacy_block}, sort_keys=True))
+        return 3
 
     from .durable_host_entrypoint import run_durable_actual_host_transition
 
