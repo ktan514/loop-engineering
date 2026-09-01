@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
@@ -74,19 +75,22 @@ class GitHubWorkDefinitionAdapter:
             return WorkDefinitionResult(WorkDefinitionStatus.COMPLETED, current)
         if snapshot.blocking_reason is not None:
             return WorkDefinitionResult(WorkDefinitionStatus.DEPENDENCY_PENDING)
-        if snapshot.acceptance_criteria_digest is None:
-            return WorkDefinitionResult(WorkDefinitionStatus.UNAVAILABLE)
-        return WorkDefinitionResult(WorkDefinitionStatus.READY, WorkRecord(
-            identity=current.identity,
-            repository=current.repository,
-            issue_number=current.issue_number,
-            issue_revision=snapshot.revision,
-            lifecycle=current.lifecycle,
-            selected_transition=current.selected_transition,
-            active_lineage_identity=current.active_lineage_identity,
-            latest_task_packet_identity=current.latest_task_packet_identity,
-            latest_checkpoint_identity=current.latest_checkpoint_identity,
-        ))
+        if not snapshot.acceptance_criteria_digest:
+            return WorkDefinitionResult(WorkDefinitionStatus.ACCEPTANCE_CRITERIA_MISSING)
+        return WorkDefinitionResult(
+            WorkDefinitionStatus.READY,
+            WorkRecord(
+                identity=current.identity,
+                repository=current.repository,
+                issue_number=current.issue_number,
+                issue_revision=snapshot.revision,
+                lifecycle=current.lifecycle,
+                selected_transition=current.selected_transition,
+                active_lineage_identity=current.active_lineage_identity,
+                latest_task_packet_identity=current.latest_task_packet_identity,
+                latest_checkpoint_identity=current.latest_checkpoint_identity,
+            ),
+        )
 
     def _snapshot(self, repository: str, issue_number: int) -> WorkDefinitionSnapshot | None:
         if "/" not in repository or issue_number < 1 or self._project_number < 1:
@@ -107,12 +111,21 @@ class GitHubWorkDefinitionAdapter:
         try:
             raw = self._runner.run(
                 (
-                    "gh", "api", "graphql", "-f", f"query={query}", "-f", f"owner={owner}",
-                    "-f", f"name={name}", "-F", f"issue={issue_number}",
+                    "gh",
+                    "api",
+                    "graphql",
+                    "-f",
+                    f"query={query}",
+                    "-f",
+                    f"owner={owner}",
+                    "-f",
+                    f"name={name}",
+                    "-F",
+                    f"issue={issue_number}",
                 )
             )
             payload = json.loads(raw)
-        except (OSError, ValueError, json.JSONDecodeError):
+        except (OSError, subprocess.SubprocessError, ValueError, json.JSONDecodeError):
             return None
         issue = _mapping(_mapping(_mapping(payload, "data"), "repository"), "issue")
         number = issue.get("number")
