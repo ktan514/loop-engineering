@@ -86,6 +86,7 @@ expected_effect
 
 必要な型付き入力:
 
+- generation
 - transition
 - effect kind
 - target identity
@@ -96,6 +97,7 @@ expected_effect
 CLIでは次を使用する。
 
 ```text
+--v2-generation <positive-integer>
 --v2-transition <value>
 --v2-effect-kind <PUSH|READY|MERGE|ISSUE_UPDATE>
 --v2-target <typed-identity>
@@ -104,11 +106,13 @@ CLIでは次を使用する。
 --v2-design <identity>   # repeatable
 ```
 
+HostはDB上の最大generationから暗黙に`+1`しない。generation省略ではpacket発行を開始しない。同じWork identity・同じgeneration・同じ型付き計画の再実行は同一packet identityへ収束させ、異なる計画なら競合として拒否する。詳細は`v2_packet_generation_issuance_contract.md`を正本とする。
+
 packet発行前に対象WorkをDBから読み、Issue / Projectの型付き定義を再同期する。依存未完了、Issue closed、受入条件digest欠落、identity競合では発行しない。
 
 発行は単一DB transactionで次を確定する。
 
-1. 次generationが既存packetと衝突しない。
+1. 明示されたgenerationが既存packetと競合しない。
 2. 対象Workに`INTENT_RECORDED` / `UNCERTAIN` effectがない。
 3. 対象Workに有効な実行leaseがない。
 4. `ISSUED` packetをINSERTする。
@@ -238,7 +242,7 @@ outbox publisherはWork lease保持中だけ呼ぶ。finalization後、outbox en
 
 1. migrationがIssue / Project typed definitionだけからWorkRecordとcutoverを作り、packetを作らない。
 2. cutover後の`--once` / continuous旧入口が変更前に拒否される。
-3. packet発行が`ISSUED + SAFE_POINT + pointer`を1 transactionで確定する。
+3. 明示generation付きpacket発行が`ISSUED + SAFE_POINT + pointer`を1 transactionで確定し、generation省略や同一generationの別計画を拒否する。
 4. packet開始が既存`ISSUED`を`STARTED`へ更新し、lease / effect intent / Checkpointを1 transactionで確定する。
 5. lease競合、pointer競合、pending effect、一意制約競合で外部effect 0回。
 6. `--v2-once`が指定Work以外を読まず、1 packet・1 effectを超えない。
