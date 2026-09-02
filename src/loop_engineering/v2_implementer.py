@@ -220,11 +220,14 @@ class CodexProposalImplementer:
         diff_check = self._run_git(worktree, ("diff", "--cached", "--check", "HEAD"))
         if not diff_check.succeeded:
             return ImplementerResult(ImplementerStatus.FAILED, "PROPOSAL_DIFF_CHECK_FAILED")
-        patch = self._git_output(
+        patch_result = self._run_git(
             worktree,
             ("diff", "--cached", "--binary", "--no-ext-diff", "HEAD"),
         )
-        if patch is None or not patch:
+        if not patch_result.succeeded:
+            return ImplementerResult(ImplementerStatus.FAILED, "PROPOSAL_PATCH_UNAVAILABLE")
+        patch = patch_result.output
+        if not patch:
             return ImplementerResult(ImplementerStatus.FAILED, "PROPOSAL_PATCH_UNAVAILABLE")
         if len(patch.encode("utf-8")) > _MAX_PATCH_BYTES:
             return ImplementerResult(ImplementerStatus.BLOCKED, "PROPOSAL_PATCH_TOO_LARGE")
