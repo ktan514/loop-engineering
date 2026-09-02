@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Protocol
-from urllib.parse import quote
 
 from .v2_implementer import ChangeProposal
 from .work_state import EffectAttempt, RecoveredWork
@@ -123,7 +122,8 @@ class TrustedProposalMaterializer:
             or _SHA_RE.fullmatch(proposal.exact_base_sha) is None
         ):
             return None
-        if hashlib.sha256(proposal.patch_text.encode("utf-8")).hexdigest() != proposal.patch_sha256:
+        raw_digest = hashlib.sha256(proposal.patch_text.encode("utf-8")).hexdigest()
+        if raw_digest != proposal.patch_sha256:
             return None
         source = self._source_identity(root, repository, proposal.exact_base_sha)
         if source is None:
@@ -133,13 +133,21 @@ class TrustedProposalMaterializer:
         worktree = Path(
             tempfile.mkdtemp(prefix=".loop-lineage-", dir=str(root.parent))
         ).resolve(strict=False)
-        patch_path = Path(
-            tempfile.mkstemp(prefix=".loop-proposal-", suffix=".patch", dir=str(root.parent))[1]
-        ).resolve(strict=False)
+        patch_path: Path | None = None
         added = False
         result: MaterializedProposal | None = None
         try:
-            patch_path.write_text(proposal.patch_text, encoding="utf-8", newline="")
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                newline="",
+                delete=False,
+                prefix=".loop-proposal-",
+                suffix=".patch",
+                dir=str(root.parent),
+            ) as stream:
+                stream.write(proposal.patch_text)
+                patch_path = Path(stream.name).resolve(strict=False)
             create = self._git(
                 root,
                 ("worktree", "add", "--detach", str(worktree), proposal.exact_base_sha),
@@ -239,7 +247,7 @@ class TrustedProposalMaterializer:
         self,
         root: Path,
         worktree: Path,
-        patch_path: Path,
+        patch_path: Path | None,
         added: bool,
     ) -> bool:
         if added:
@@ -255,16 +263,17 @@ class TrustedProposalMaterializer:
                 worktree.rmdir()
             except OSError:
                 return False
-        try:
-            patch_path.unlink(missing_ok=True)
-        except OSError:
-            return False
+        if patch_path is not None:
+            try:
+                patch_path.unlink(missing_ok=True)
+            except OSError:
+                return False
         listing = self._git_output(root, ("worktree", "list", "--porcelain"))
         return (
             listing is not None
             and str(worktree) not in listing
             and not worktree.exists()
-            and not patch_path.exists()
+            and (patch_path is None or not patch_path.exists())
         )
 
     def _git(
