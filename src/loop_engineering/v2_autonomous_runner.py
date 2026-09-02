@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -13,7 +12,6 @@ from typing import Protocol
 
 from .v2_autonomous_runtime import (
     AutonomousDispatch,
-    AutonomousRuntimeState,
     AutonomousRuntimeUnavailable,
     PostgreSQLAutonomousRuntimeStore,
     runtime_identity,
@@ -21,8 +19,8 @@ from .v2_autonomous_runtime import (
 from .v2_evidence import EvidenceTarget, V2EvidenceCoordinator, apply_evidence
 from .v2_goal_planning import (
     BootstrapResult,
-    PlanningProjectionPort,
     PlannedWork,
+    PlanningProjectionPort,
     ProductDevelopmentRegistration,
     V2GoalBootstrapService,
 )
@@ -30,14 +28,11 @@ from .v2_supervisor import (
     V2Supervisor,
     V2SupervisorDecision,
     V2SupervisorDisposition,
-    V2Transition,
     V2WorkObservation,
     derive_transition,
     schedule_key,
 )
 from .v2_work_queue import V2WorkQueueSnapshot
-
-_PR_ID_RE = re.compile(r"pr:(\d+)")
 
 
 class AutonomousRunStatus(str, Enum):
@@ -71,7 +66,10 @@ class AutonomousRunResult:
 
 
 class WorkQueuePort(Protocol):
-    def synchronize(self, registration: ProductDevelopmentRegistration) -> V2WorkQueueSnapshot: ...
+    def synchronize(
+        self,
+        registration: ProductDevelopmentRegistration,
+    ) -> V2WorkQueueSnapshot: ...
 
 
 class TransitionExecutorPort(Protocol):
@@ -105,7 +103,7 @@ class _LineageSnapshot:
 
 
 class DurableGoalBootstrap:
-    """最初に採用したPlanをDBへ固定し、restart後は同じPlanだけを再projectionする。"""
+    """採用済みPlanをDBへ固定し、restart後にPlannerを再実行しない。"""
 
     def __init__(
         self,
@@ -131,7 +129,7 @@ class DurableGoalBootstrap:
 
 
 class GitHubAutonomousLineageObserver:
-    """Work branchに対応するcurrent PR/headとcanonical design blobをlive readbackする。"""
+    """Work branchに対応するcurrent PR/head/canonical designをlive readbackする。"""
 
     def __init__(self, runner: LineageCommandRunner) -> None:
         self._runner = runner
@@ -144,13 +142,10 @@ class GitHubAutonomousLineageObserver:
     ) -> _LineageSnapshot:
         branch = _work_branch(registration.work_branch_template, work.issue_number)
         open_prs = self._pr_list(registration.repository_identity, branch, "open")
-        if open_prs is None:
+        if open_prs is None or len(open_prs) > 1:
             return _LineageSnapshot(replace(work, unresolved_conflict=True), None)
-        if len(open_prs) > 1:
-            return _LineageSnapshot(replace(work, unresolved_conflict=True), None)
-        if len(open_prs) == 1:
-            pr = open_prs[0]
-            number, head, base = _pr_identity(pr)
+        if open_prs:
+            number, head, base = _pr_identity(open_prs[0])
             if number is None or head is None or base != registration.trunk_branch:
                 return _LineageSnapshot(replace(work, unresolved_conflict=True), None)
             designs = self._design_identities(
@@ -176,8 +171,7 @@ class GitHubAutonomousLineageObserver:
             return _LineageSnapshot(replace(work, unresolved_conflict=True), None)
         if not merged:
             return _LineageSnapshot(work, None)
-        latest = max(merged, key=_pr_number_sort)
-        number, head, base = _pr_identity(latest)
+        number, head, base = _pr_identity(max(merged, key=_pr_number_sort))
         if number is None or head is None or base != registration.trunk_branch:
             return _LineageSnapshot(replace(work, unresolved_conflict=True), None)
         return _LineageSnapshot(
@@ -227,24 +221,16 @@ class GitHubAutonomousLineageObserver:
         head: str,
         paths: tuple[str, ...],
     ) -> tuple[str, ...] | None:
-        if not paths:
-            return ()
         identities: list[str] = []
         for path in paths:
             try:
                 raw = self._runner.run(
-                    (
-                        "gh",
-                        "api",
-                        f"repos/{repository}/contents/{path}?ref={head}",
-                    )
+                    ("gh", "api", f"repos/{repository}/contents/{path}?ref={head}")
                 )
                 payload = json.loads(raw)
             except (OSError, subprocess.SubprocessError, ValueError, json.JSONDecodeError):
                 return None
-            if not isinstance(payload, dict):
-                return None
-            blob = payload.get("sha")
+            blob = payload.get("sha") if isinstance(payload, dict) else None
             if not isinstance(blob, str) or not blob:
                 return None
             identities.append(f"design:{path}:{blob}")
@@ -261,7 +247,10 @@ class EvidenceEnricher:
         snapshot: _LineageSnapshot,
         planned: PlannedWork,
     ) -> V2WorkObservation:
-        work = snapshot.observation
+        work = replace(
+            snapshot.observation,
+            human_verification_required=planned.human_verification_required,
+        )
         if snapshot.pr_number is None or work.exact_head_sha is None or work.merged:
             return work
         target = EvidenceTarget(
@@ -324,242 +313,250 @@ class V2AutonomousRunner:
         if not 1 <= max_iterations <= 1000:
             raise ValueError("AUTONOMOUS_ITERATION_LIMIT_INVALID")
         try:
-            state = self._runtime.ensure_runtime(registration)
-            if state.status == "COMPLETED":
-                return AutonomousRunResult(
-                    AutonomousRunStatus.GOAL_COMPLETED,
-                    "GOAL_ALREADY_COMPLETED",
-                    0,
+            return self._run(registration, max_iterations)
+        except (AutonomousRuntimeUnavailable, ValueError, RuntimeError) as error:
+            return AutonomousRunResult(
+                AutonomousRunStatus.INTERVENTION_REQUIRED,
+                str(error),
+                0,
+                runtime_identity(registration),
+            )
+
+    def _run(
+        self,
+        registration: ProductDevelopmentRegistration,
+        max_iterations: int,
+    ) -> AutonomousRunResult:
+        state = self._runtime.ensure_runtime(registration)
+        if state.status == "COMPLETED":
+            return AutonomousRunResult(
+                AutonomousRunStatus.GOAL_COMPLETED,
+                "GOAL_ALREADY_COMPLETED",
+                0,
+                state.runtime_identity,
+            )
+        bootstrap = self._bootstrap.ensure(registration)
+        planned = _planned_by_issue(bootstrap)
+        progressed = False
+
+        for iteration in range(1, max_iterations + 1):
+            queue = self._queue.synchronize(registration)
+            works = self._observe_all(registration, queue.works, planned)
+            dispatched = self._runtime.dispatched_schedule_keys(state.runtime_identity)
+            selectable, suppressed = _without_dispatched(
+                registration.goal_revision,
+                works,
+                dispatched,
+            )
+            acceptance = self._goal_acceptance.complete(registration, bootstrap, works)
+            acceptance = acceptance and not suppressed
+            current = _current_if_selectable(queue.current_work_identity, selectable)
+            decision = self._supervisor.decide(
+                goal_revision=registration.goal_revision,
+                works=selectable,
+                current_work_identity=current,
+                pending_effect=queue.pending_effect,
+                goal_acceptance_complete=acceptance,
+            )
+            fingerprint = _progress_fingerprint(
+                registration.goal_revision,
+                works,
+                queue.pending_effect,
+                decision,
+            )
+            no_progress = (
+                state.no_progress_count + 1
+                if fingerprint == state.last_progress_fingerprint
+                else 0
+            )
+
+            terminal = self._terminal_decision(
+                state.runtime_identity,
+                current,
+                decision,
+                fingerprint,
+                no_progress,
+                queue.pending_effect,
+                iteration,
+            )
+            if terminal is not None:
+                return terminal
+
+            if (
+                decision.work_identity is None
+                or decision.transition is None
+                or decision.schedule_key is None
+            ):
+                raise AutonomousRuntimeUnavailable("SUPERVISOR_ACTION_IDENTITY_MISSING")
+            work = next(item for item in works if item.work_identity == decision.work_identity)
+            planned_work = planned.get(work.issue_number)
+            if planned_work is None:
+                raise AutonomousRuntimeUnavailable("PLANNED_WORK_MAPPING_MISSING")
+            dispatch = AutonomousDispatch(
+                decision.schedule_key,
+                state.runtime_identity,
+                work.work_identity,
+                decision.transition.value,
+                "DISPATCHED",
+                "SUPERVISOR_DISPATCH",
+            )
+            if not self._runtime.dispatch(dispatch):
+                state = self._runtime.update_runtime(
                     state.runtime_identity,
-                    None,
+                    status="WAITING",
+                    current_work_identity=work.work_identity,
+                    schedule_key=decision.schedule_key,
+                    progress_fingerprint=fingerprint,
+                    no_progress_count=no_progress,
+                    detail="DUPLICATE_DISPATCH_SUPPRESSED",
                 )
-            bootstrap = self._bootstrap.ensure(registration)
-            planned = _planned_by_issue(bootstrap)
-            progressed = False
-            for iteration in range(1, max_iterations + 1):
-                queue = self._queue.synchronize(registration)
-                works = self._observe_all(registration, queue.works, planned)
-                dispatched = self._runtime.dispatched_schedule_keys(state.runtime_identity)
-                selectable, suppressed_incomplete = _without_dispatched(
-                    registration.goal_revision,
-                    works,
-                    dispatched,
-                )
-                acceptance = self._goal_acceptance.complete(registration, bootstrap, works)
-                if suppressed_incomplete:
-                    acceptance = False
-                current = queue.current_work_identity
-                if current is not None and all(
-                    work.work_identity != current for work in selectable
-                ):
-                    current = None
-                decision = self._supervisor.decide(
-                    goal_revision=registration.goal_revision,
-                    works=selectable,
-                    current_work_identity=current,
-                    dispatched_schedule_keys=frozenset(),
-                    pending_effect=queue.pending_effect,
-                    goal_acceptance_complete=acceptance,
-                )
-                fingerprint = _progress_fingerprint(
-                    registration.goal_revision,
-                    works,
-                    queue.pending_effect,
-                    decision,
-                )
-                no_progress = (
-                    state.no_progress_count + 1
-                    if fingerprint == state.last_progress_fingerprint
-                    else 0
-                )
+                continue
 
-                if decision.disposition is V2SupervisorDisposition.COMPLETE_GOAL:
-                    state = self._runtime.update_runtime(
-                        state.runtime_identity,
-                        status="COMPLETED",
-                        current_work_identity=None,
-                        schedule_key=None,
-                        progress_fingerprint=fingerprint,
-                        no_progress_count=0,
-                        detail=decision.detail,
-                    )
-                    return AutonomousRunResult(
-                        AutonomousRunStatus.GOAL_COMPLETED,
-                        decision.detail,
-                        iteration,
-                        state.runtime_identity,
-                        None,
-                    )
-                if decision.disposition is V2SupervisorDisposition.INTERVENTION_REQUIRED:
-                    state = self._runtime.update_runtime(
-                        state.runtime_identity,
-                        status="INTERVENTION_REQUIRED",
-                        current_work_identity=current,
-                        schedule_key=None,
-                        progress_fingerprint=fingerprint,
-                        no_progress_count=no_progress,
-                        detail=decision.detail,
-                    )
-                    return AutonomousRunResult(
-                        AutonomousRunStatus.INTERVENTION_REQUIRED,
-                        decision.detail,
-                        iteration,
-                        state.runtime_identity,
-                        current,
-                    )
-                if decision.disposition is V2SupervisorDisposition.YIELD_EXTERNAL:
-                    detail = decision.detail
-                    if no_progress >= self._no_progress_limit and queue.pending_effect:
-                        detail = "PENDING_EFFECT_RECONCILIATION_REQUIRED"
-                        status = "INTERVENTION_REQUIRED"
-                        result_status = AutonomousRunStatus.INTERVENTION_REQUIRED
-                    else:
-                        status = "WAITING"
-                        result_status = AutonomousRunStatus.WAITING
-                    state = self._runtime.update_runtime(
-                        state.runtime_identity,
-                        status=status,
-                        current_work_identity=current,
-                        schedule_key=decision.schedule_key,
-                        progress_fingerprint=fingerprint,
-                        no_progress_count=no_progress,
-                        detail=detail,
-                    )
-                    return AutonomousRunResult(
-                        result_status,
-                        detail,
-                        iteration,
-                        state.runtime_identity,
-                        current,
-                    )
-
-                if (
-                    decision.work_identity is None
-                    or decision.transition is None
-                    or decision.schedule_key is None
-                ):
-                    raise AutonomousRuntimeUnavailable("SUPERVISOR_ACTION_IDENTITY_MISSING")
-                work = next(
-                    item for item in works if item.work_identity == decision.work_identity
+            outcome = self._transitions.execute(
+                registration,
+                bootstrap,
+                work,
+                planned_work,
+                decision,
+            )
+            self._runtime.update_dispatch(
+                decision.schedule_key,
+                _dispatch_status(outcome.status),
+                outcome.detail,
+            )
+            if outcome.status is TransitionExecutionStatus.INTERVENTION_REQUIRED:
+                self._runtime.update_runtime(
+                    state.runtime_identity,
+                    status="INTERVENTION_REQUIRED",
+                    current_work_identity=work.work_identity,
+                    schedule_key=decision.schedule_key,
+                    progress_fingerprint=fingerprint,
+                    no_progress_count=no_progress,
+                    detail=outcome.detail,
                 )
-                planned_work = planned.get(work.issue_number)
-                if planned_work is None:
-                    raise AutonomousRuntimeUnavailable("PLANNED_WORK_MAPPING_MISSING")
-                dispatch = AutonomousDispatch(
-                    decision.schedule_key,
+                return AutonomousRunResult(
+                    AutonomousRunStatus.INTERVENTION_REQUIRED,
+                    outcome.detail,
+                    iteration,
                     state.runtime_identity,
                     work.work_identity,
-                    decision.transition.value,
-                    "DISPATCHED",
-                    "SUPERVISOR_DISPATCH",
                 )
-                if not self._runtime.dispatch(dispatch):
-                    state = self._runtime.update_runtime(
-                        state.runtime_identity,
-                        status="WAITING",
-                        current_work_identity=work.work_identity,
-                        schedule_key=decision.schedule_key,
-                        progress_fingerprint=fingerprint,
-                        no_progress_count=no_progress,
-                        detail="DUPLICATE_DISPATCH_SUPPRESSED",
-                    )
-                    continue
-                outcome = self._transitions.execute(
-                    registration,
-                    bootstrap,
-                    work,
-                    planned_work,
-                    decision,
-                )
-                dispatch_status = _dispatch_status(outcome.status)
-                self._runtime.update_dispatch(
-                    decision.schedule_key,
-                    dispatch_status,
-                    outcome.detail,
-                )
-                if outcome.status is TransitionExecutionStatus.INTERVENTION_REQUIRED:
-                    state = self._runtime.update_runtime(
-                        state.runtime_identity,
-                        status="INTERVENTION_REQUIRED",
-                        current_work_identity=work.work_identity,
-                        schedule_key=decision.schedule_key,
-                        progress_fingerprint=fingerprint,
-                        no_progress_count=no_progress,
-                        detail=outcome.detail,
-                    )
-                    return AutonomousRunResult(
-                        AutonomousRunStatus.INTERVENTION_REQUIRED,
-                        outcome.detail,
-                        iteration,
-                        state.runtime_identity,
-                        work.work_identity,
-                    )
-                if outcome.status is TransitionExecutionStatus.WAITING:
-                    state = self._runtime.update_runtime(
-                        state.runtime_identity,
-                        status="ACTIVE",
-                        current_work_identity=work.work_identity,
-                        schedule_key=decision.schedule_key,
-                        progress_fingerprint=fingerprint,
-                        no_progress_count=no_progress,
-                        detail=outcome.detail,
-                    )
-                    continue
-                if outcome.status is TransitionExecutionStatus.FAILED:
-                    if no_progress >= self._no_progress_limit:
-                        state = self._runtime.update_runtime(
-                            state.runtime_identity,
-                            status="WAITING",
-                            current_work_identity=work.work_identity,
-                            schedule_key=decision.schedule_key,
-                            progress_fingerprint=fingerprint,
-                            no_progress_count=no_progress,
-                            detail="REPAIRABLE_FAILURE_RETRY_BOUNDED",
-                        )
-                        return AutonomousRunResult(
-                            AutonomousRunStatus.WAITING,
-                            "REPAIRABLE_FAILURE_RETRY_BOUNDED",
-                            iteration,
-                            state.runtime_identity,
-                            work.work_identity,
-                        )
-                    state = self._runtime.update_runtime(
-                        state.runtime_identity,
-                        status="ACTIVE",
-                        current_work_identity=work.work_identity,
-                        schedule_key=decision.schedule_key,
-                        progress_fingerprint=fingerprint,
-                        no_progress_count=no_progress,
-                        detail=outcome.detail,
-                    )
-                    continue
-
-                progressed = True
+            if outcome.status is TransitionExecutionStatus.FAILED:
                 state = self._runtime.update_runtime(
                     state.runtime_identity,
                     status="ACTIVE",
                     current_work_identity=work.work_identity,
                     schedule_key=decision.schedule_key,
-                    progress_fingerprint=None,
-                    no_progress_count=0,
+                    progress_fingerprint=fingerprint,
+                    no_progress_count=no_progress,
                     detail=outcome.detail,
                 )
-            return AutonomousRunResult(
-                AutonomousRunStatus.PROGRESSED if progressed else AutonomousRunStatus.ITERATION_LIMIT,
-                "AUTONOMOUS_ITERATION_LIMIT_REACHED",
-                max_iterations,
+                continue
+            if outcome.status is TransitionExecutionStatus.WAITING:
+                state = self._runtime.update_runtime(
+                    state.runtime_identity,
+                    status="ACTIVE",
+                    current_work_identity=work.work_identity,
+                    schedule_key=decision.schedule_key,
+                    progress_fingerprint=fingerprint,
+                    no_progress_count=no_progress,
+                    detail=outcome.detail,
+                )
+                continue
+
+            progressed = True
+            state = self._runtime.update_runtime(
                 state.runtime_identity,
-                state.current_work_identity,
+                status="ACTIVE",
+                current_work_identity=work.work_identity,
+                schedule_key=decision.schedule_key,
+                progress_fingerprint=None,
+                no_progress_count=0,
+                detail=outcome.detail,
             )
-        except (AutonomousRuntimeUnavailable, ValueError) as error:
-            identity = runtime_identity(registration)
+
+        result_status = (
+            AutonomousRunStatus.PROGRESSED
+            if progressed
+            else AutonomousRunStatus.ITERATION_LIMIT
+        )
+        return AutonomousRunResult(
+            result_status,
+            "AUTONOMOUS_ITERATION_LIMIT_REACHED",
+            max_iterations,
+            state.runtime_identity,
+            state.current_work_identity,
+        )
+
+    def _terminal_decision(
+        self,
+        runtime_identity_value: str,
+        current_work_identity: str | None,
+        decision: V2SupervisorDecision,
+        fingerprint: str,
+        no_progress: int,
+        pending_effect: bool,
+        iteration: int,
+    ) -> AutonomousRunResult | None:
+        if decision.disposition is V2SupervisorDisposition.COMPLETE_GOAL:
+            self._runtime.update_runtime(
+                runtime_identity_value,
+                status="COMPLETED",
+                current_work_identity=None,
+                schedule_key=None,
+                progress_fingerprint=fingerprint,
+                no_progress_count=0,
+                detail=decision.detail,
+            )
+            return AutonomousRunResult(
+                AutonomousRunStatus.GOAL_COMPLETED,
+                decision.detail,
+                iteration,
+                runtime_identity_value,
+            )
+        if decision.disposition is V2SupervisorDisposition.INTERVENTION_REQUIRED:
+            self._runtime.update_runtime(
+                runtime_identity_value,
+                status="INTERVENTION_REQUIRED",
+                current_work_identity=current_work_identity,
+                schedule_key=None,
+                progress_fingerprint=fingerprint,
+                no_progress_count=no_progress,
+                detail=decision.detail,
+            )
             return AutonomousRunResult(
                 AutonomousRunStatus.INTERVENTION_REQUIRED,
-                str(error),
-                0,
-                identity,
-                None,
+                decision.detail,
+                iteration,
+                runtime_identity_value,
+                current_work_identity,
             )
+        if decision.disposition is not V2SupervisorDisposition.YIELD_EXTERNAL:
+            return None
+        if no_progress >= self._no_progress_limit and pending_effect:
+            detail = "PENDING_EFFECT_RECONCILIATION_REQUIRED"
+            status = "INTERVENTION_REQUIRED"
+            result_status = AutonomousRunStatus.INTERVENTION_REQUIRED
+        else:
+            detail = decision.detail
+            status = "WAITING"
+            result_status = AutonomousRunStatus.WAITING
+        self._runtime.update_runtime(
+            runtime_identity_value,
+            status=status,
+            current_work_identity=current_work_identity,
+            schedule_key=decision.schedule_key,
+            progress_fingerprint=fingerprint,
+            no_progress_count=no_progress,
+            detail=detail,
+        )
+        return AutonomousRunResult(
+            result_status,
+            detail,
+            iteration,
+            runtime_identity_value,
+            current_work_identity,
+        )
 
     def _observe_all(
         self,
@@ -605,11 +602,23 @@ def _without_dispatched(
             continue
         key = schedule_key(goal_revision, work, transition)
         if key in dispatched:
-            if work.lifecycle != "COMPLETED":
-                suppressed_incomplete = True
+            suppressed_incomplete = suppressed_incomplete or work.lifecycle != "COMPLETED"
             continue
         kept.append(work)
     return tuple(kept), suppressed_incomplete
+
+
+def _current_if_selectable(
+    current_work_identity: str | None,
+    works: tuple[V2WorkObservation, ...],
+) -> str | None:
+    if current_work_identity is None:
+        return None
+    return (
+        current_work_identity
+        if any(work.work_identity == current_work_identity for work in works)
+        else None
+    )
 
 
 def _progress_fingerprint(
@@ -633,6 +642,7 @@ def _progress_fingerprint(
                 "id": work.work_identity,
                 "revision": work.issue_revision,
                 "lifecycle": work.lifecycle,
+                "selected_transition": work.selected_transition,
                 "head": work.exact_head_sha,
                 "lineage": work.active_lineage_identity,
                 "ci": (work.verification_state.value, work.verification_identity),
@@ -650,7 +660,7 @@ def _progress_fingerprint(
         ],
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return "progress:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return "progress:" + hashlib.sha256(raw.encode()).hexdigest()
 
 
 def _dispatch_status(status: TransitionExecutionStatus) -> str:
@@ -665,20 +675,14 @@ def _work_branch(template: str, issue_number: int) -> str:
     if template.count("{issue}") != 1 or issue_number < 1:
         raise AutonomousRuntimeUnavailable("WORK_BRANCH_TEMPLATE_INVALID")
     branch = template.replace("{issue}", str(issue_number))
-    if (
+    invalid = (
         not branch
         or branch.startswith("/")
         or branch.endswith("/")
         or ".." in branch
-        or " " in branch
-        or "~" in branch
-        or "^" in branch
-        or ":" in branch
-        or "?" in branch
-        or "*" in branch
-        or "[" in branch
-        or "\\" in branch
-    ):
+        or any(char in branch for char in " ~^:?*[\\")
+    )
+    if invalid:
         raise AutonomousRuntimeUnavailable("WORK_BRANCH_TEMPLATE_INVALID")
     return branch
 
