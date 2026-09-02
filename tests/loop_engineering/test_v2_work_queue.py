@@ -1,4 +1,5 @@
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -13,8 +14,9 @@ class FakeRunner:
     def __init__(self, issues: list[dict[str, object]]) -> None:
         self.issues = issues
 
-    def run(self, args: tuple[str, ...]) -> str:
-        assert args[:3] == ("gh", "issue", "list")
+    def run(self, args: Sequence[str]) -> str:
+        command = tuple(args)
+        assert command[:3] == ("gh", "issue", "list")
         return json.dumps(self.issues)
 
 
