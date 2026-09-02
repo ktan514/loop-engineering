@@ -1,6 +1,6 @@
 import hashlib
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from loop_engineering.v2_implementer import (
@@ -163,13 +163,8 @@ def test_design_returns_scoped_patch_and_strips_credentials(tmp_path: Path) -> N
 
 
 def test_implement_requires_canonical_design(tmp_path: Path) -> None:
-    task = packet(tmp_path, ImplementerTransition.IMPLEMENT)
-    task = DevelopmentTaskPacket(
-        **{
-            field: getattr(task, field)
-            for field in task.__dataclass_fields__
-            if field != "canonical_design_identities"
-        },
+    task = replace(
+        packet(tmp_path, ImplementerTransition.IMPLEMENT),
         canonical_design_identities=(),
     )
     runner = FakeRunner(task.workspace_canonical_path, exact_base=task.exact_base_sha)
@@ -182,13 +177,8 @@ def test_implement_requires_canonical_design(tmp_path: Path) -> None:
 
 
 def test_repair_requires_active_lineage(tmp_path: Path) -> None:
-    task = packet(tmp_path, ImplementerTransition.REPAIR)
-    task = DevelopmentTaskPacket(
-        **{
-            field: getattr(task, field)
-            for field in task.__dataclass_fields__
-            if field != "active_lineage_identity"
-        },
+    task = replace(
+        packet(tmp_path, ImplementerTransition.REPAIR),
         active_lineage_identity=None,
     )
     runner = FakeRunner(task.workspace_canonical_path, exact_base=task.exact_base_sha)
