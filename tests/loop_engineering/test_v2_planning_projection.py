@@ -57,7 +57,7 @@ class FakeGitHubRunner:
             body = _raw_field(command, "body")
             number = self.next_issue
             self.next_issue += 1
-            issue = {
+            issue: dict[str, object] = {
                 "number": number,
                 "title": title,
                 "body": body,
@@ -72,11 +72,12 @@ class FakeGitHubRunner:
             return json.dumps({"id": "PROJECT"})
         if command[:3] == ("gh", "project", "item-add"):
             issue_url = command[command.index("--url") + 1]
-            item = {"id": f"ITEM{self.next_item}", "issue_url": issue_url}
+            item_id = f"ITEM{self.next_item}"
+            item: dict[str, object] = {"id": item_id, "issue_url": issue_url}
             self.next_item += 1
             self.items.append(item)
-            self.item_fields[item["id"]] = {}
-            return json.dumps({"id": item["id"]})
+            self.item_fields[item_id] = {}
+            return json.dumps({"id": item_id})
         if command[:3] == ("gh", "project", "item-edit"):
             item_id = command[command.index("--id") + 1]
             field_id = command[command.index("--field-id") + 1]
