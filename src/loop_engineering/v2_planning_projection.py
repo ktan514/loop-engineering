@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, TypeVar
 
-from .v2_bootstrap_state import BootstrapEffect, BootstrapStateUnavailable
+from .v2_bootstrap_state import BootstrapEffect
 from .v2_goal_planning import (
     PlannedWork,
     ProductDevelopmentRegistration,
@@ -20,6 +20,8 @@ from .v2_goal_planning import (
     goal_marker,
     work_marker,
 )
+
+T = TypeVar("T")
 
 
 class PlanningProjectionError(RuntimeError):
@@ -85,18 +87,20 @@ class GitHubPlanningProjectionAdapter:
             title=f"Goal: {_title(registration.goal_text)}",
             body=_goal_body(registration, proposal),
         )
-        goal_item = self._ensure_project_item(registration, project_id, goal_issue.url, "goal")
+        goal_item = self._ensure_project_item(
+            registration, project_id, goal_issue.url, role="goal"
+        )
         self._ensure_field(
             registration,
             project_id,
             goal_item.item_id,
             status_field,
             registration.initial_project_status,
-            option_id=status_option,
             role="goal-status",
+            option_id=status_option,
         )
 
-        projected: list[ProjectedWork] = []
+        works: list[ProjectedWork] = []
         for work in proposal.works:
             issue = self._ensure_issue(
                 registration,
@@ -109,7 +113,7 @@ class GitHubPlanningProjectionAdapter:
                 registration,
                 project_id,
                 issue.url,
-                f"work:{work.logical_key}",
+                role=f"work:{work.logical_key}",
             )
             digest = acceptance_digest(work.acceptance_criteria)
             self._ensure_field(
@@ -126,24 +130,24 @@ class GitHubPlanningProjectionAdapter:
                 item.item_id,
                 status_field,
                 registration.initial_project_status,
-                option_id=status_option,
                 role=f"work:{work.logical_key}:status",
+                option_id=status_option,
             )
-            projected.append(
+            works.append(
                 ProjectedWork(
-                    logical_key=work.logical_key,
-                    issue_number=issue.number,
-                    issue_url=issue.url,
-                    project_item_id=item.item_id,
-                    acceptance_digest=digest,
-                    dependencies=work.dependencies,
+                    work.logical_key,
+                    issue.number,
+                    issue.url,
+                    item.item_id,
+                    digest,
+                    work.dependencies,
                 )
             )
         return ProjectedPlan(
-            goal_issue_number=goal_issue.number,
-            goal_issue_url=goal_issue.url,
-            goal_project_item_id=goal_item.item_id,
-            works=tuple(projected),
+            goal_issue.number,
+            goal_issue.url,
+            goal_item.item_id,
+            tuple(works),
         )
 
     def _ensure_issue(
@@ -155,44 +159,10 @@ class GitHubPlanningProjectionAdapter:
         title: str,
         body: str,
     ) -> _Issue:
-        found = self._find_issue(registration.repository_identity, marker)
-        if found is not None:
-            return found
-        effect = self._prepare_effect(
-            registration,
-            kind="ISSUE_CREATE",
-            role=role,
-            target_identity=f"issue-marker:{marker}",
-            expected_preconditions=(("marker_count", "0"),),
-            expected_effect=(("marker", marker),),
-        )
-        if effect.status == "CONFIRMED":
-            found = self._find_issue(registration.repository_identity, marker)
-            if found is None:
-                raise PlanningProjectionError("ISSUE_CONFIRMED_BUT_MISSING")
-            return found
-        if effect.status == "UNCERTAIN":
-            found = self._find_issue(registration.repository_identity, marker)
-            if found is not None:
-                self._state.record_outcome(effect.idempotency_key, "CONFIRMED")
-                return found
-            raise PlanningProjectionError("ISSUE_CREATE_UNCERTAIN")
-        if effect.status == "NO_EFFECT":
-            effect = self._next_intent(
-                registration,
-                kind="ISSUE_CREATE",
-                role=role,
-                target_identity=f"issue-marker:{marker}",
-                expected_preconditions=(("marker_count", "0"),),
-                expected_effect=(("marker", marker),),
-            )
+        def readback() -> _Issue | None:
+            return self._find_issue(registration.repository_identity, marker)
 
-        if self._find_issue(registration.repository_identity, marker) is not None:
-            self._state.record_outcome(effect.idempotency_key, "CONFIRMED")
-            found = self._find_issue(registration.repository_identity, marker)
-            assert found is not None
-            return found
-        try:
+        def mutate() -> None:
             self._run_json(
                 (
                     "gh",
@@ -206,59 +176,29 @@ class GitHubPlanningProjectionAdapter:
                     f"body={body}",
                 )
             )
-        except PlanningProjectionError:
-            found = self._find_issue(registration.repository_identity, marker)
-            if found is not None:
-                self._state.record_outcome(effect.idempotency_key, "CONFIRMED")
-                return found
-            self._state.record_outcome(effect.idempotency_key, "NO_EFFECT")
-            raise
-        found = self._find_issue(registration.repository_identity, marker)
-        if found is None:
-            self._state.record_outcome(effect.idempotency_key, "UNCERTAIN")
-            raise PlanningProjectionError("ISSUE_CREATE_READBACK_UNPROVEN")
-        self._state.record_outcome(effect.idempotency_key, "CONFIRMED")
-        return found
+
+        return self._ensure_created(
+            registration,
+            kind="ISSUE_CREATE",
+            role=role,
+            target_identity=f"issue-marker:{marker}",
+            expected_effect=(("marker", marker),),
+            readback=readback,
+            mutate=mutate,
+        )
 
     def _ensure_project_item(
         self,
         registration: ProductDevelopmentRegistration,
         project_id: str,
         issue_url: str,
+        *,
         role: str,
     ) -> _ProjectItem:
-        existing = self._find_project_item(project_id, issue_url)
-        if existing is not None:
-            return existing
-        effect = self._prepare_effect(
-            registration,
-            kind="PROJECT_ITEM_ADD",
-            role=role,
-            target_identity=f"project:{project_id}:issue:{issue_url}",
-            expected_preconditions=(("present", "false"),),
-            expected_effect=(("issue_url", issue_url),),
-        )
-        if effect.status == "CONFIRMED":
-            existing = self._find_project_item(project_id, issue_url)
-            if existing is None:
-                raise PlanningProjectionError("PROJECT_ITEM_CONFIRMED_BUT_MISSING")
-            return existing
-        if effect.status == "UNCERTAIN":
-            existing = self._find_project_item(project_id, issue_url)
-            if existing is not None:
-                self._state.record_outcome(effect.idempotency_key, "CONFIRMED")
-                return existing
-            raise PlanningProjectionError("PROJECT_ITEM_ADD_UNCERTAIN")
-        if effect.status == "NO_EFFECT":
-            effect = self._next_intent(
-                registration,
-                kind="PROJECT_ITEM_ADD",
-                role=role,
-                target_identity=f"project:{project_id}:issue:{issue_url}",
-                expected_preconditions=(("present", "false"),),
-                expected_effect=(("issue_url", issue_url),),
-            )
-        try:
+        def readback() -> _ProjectItem | None:
+            return self._find_project_item(project_id, issue_url)
+
+        def mutate() -> None:
             self._run_json(
                 (
                     "gh",
@@ -273,19 +213,70 @@ class GitHubPlanningProjectionAdapter:
                     "json",
                 )
             )
+
+        return self._ensure_created(
+            registration,
+            kind="PROJECT_ITEM_ADD",
+            role=role,
+            target_identity=f"project:{project_id}:issue:{issue_url}",
+            expected_effect=(("issue_url", issue_url),),
+            readback=readback,
+            mutate=mutate,
+        )
+
+    def _ensure_created(
+        self,
+        registration: ProductDevelopmentRegistration,
+        *,
+        kind: str,
+        role: str,
+        target_identity: str,
+        expected_effect: tuple[tuple[str, str], ...],
+        readback: Callable[[], T | None],
+        mutate: Callable[[], None],
+    ) -> T:
+        observed = readback()
+        if observed is not None:
+            return observed
+        effect = self._prepare_effect(
+            registration,
+            kind=kind,
+            role=role,
+            target_identity=target_identity,
+            expected_preconditions=(("present", "false"),),
+            expected_effect=expected_effect,
+        )
+        if effect.status == "CONFIRMED":
+            confirmed = readback()
+            if confirmed is None:
+                raise PlanningProjectionError("CONFIRMED_EFFECT_MISSING")
+            return confirmed
+        if effect.status == "UNCERTAIN":
+            reconciled = readback()
+            if reconciled is None:
+                raise PlanningProjectionError("BOOTSTRAP_EFFECT_UNCERTAIN")
+            self._state.record_outcome(effect.idempotency_key, "CONFIRMED")
+            return reconciled
+
+        reconciled = readback()
+        if reconciled is not None:
+            self._state.record_outcome(effect.idempotency_key, "CONFIRMED")
+            return reconciled
+        try:
+            mutate()
         except PlanningProjectionError:
-            existing = self._find_project_item(project_id, issue_url)
-            if existing is not None:
+            reconciled = readback()
+            if reconciled is not None:
                 self._state.record_outcome(effect.idempotency_key, "CONFIRMED")
-                return existing
+                return reconciled
             self._state.record_outcome(effect.idempotency_key, "NO_EFFECT")
             raise
-        existing = self._find_project_item(project_id, issue_url)
-        if existing is None:
+        reconciled = readback()
+        if reconciled is None:
             self._state.record_outcome(effect.idempotency_key, "UNCERTAIN")
-            raise PlanningProjectionError("PROJECT_ITEM_ADD_READBACK_UNPROVEN")
+            raise PlanningProjectionError("BOOTSTRAP_CREATE_READBACK_UNPROVEN")
         self._state.record_outcome(effect.idempotency_key, "CONFIRMED")
-        return existing
+        return reconciled
 
     def _ensure_field(
         self,
@@ -299,9 +290,10 @@ class GitHubPlanningProjectionAdapter:
         option_id: str | None = None,
     ) -> None:
         observed = self._item_fields(item_id)
-        if observed.get(field.name) == value:
+        current = observed.get(field.name)
+        if current == value:
             return
-        before = observed.get(field.name, "<unset>")
+        before = current or "<unset>"
         effect = self._prepare_effect(
             registration,
             kind="PROJECT_FIELD_UPDATE",
@@ -312,29 +304,22 @@ class GitHubPlanningProjectionAdapter:
         )
         if effect.status == "CONFIRMED":
             if self._item_fields(item_id).get(field.name) != value:
-                raise PlanningProjectionError("PROJECT_FIELD_CONFIRMED_BUT_MISMATCH")
+                raise PlanningProjectionError("CONFIRMED_FIELD_MISMATCH")
             return
         if effect.status == "UNCERTAIN":
             if self._item_fields(item_id).get(field.name) == value:
                 self._state.record_outcome(effect.idempotency_key, "CONFIRMED")
                 return
             raise PlanningProjectionError("PROJECT_FIELD_UPDATE_UNCERTAIN")
-        if effect.status == "NO_EFFECT":
-            effect = self._next_intent(
-                registration,
-                kind="PROJECT_FIELD_UPDATE",
-                role=role,
-                target_identity=f"project-item:{item_id}:field:{field.name}",
-                expected_preconditions=(("value", before),),
-                expected_effect=(("value", value),),
-            )
-        fresh_before = self._item_fields(item_id).get(field.name, "<unset>")
-        if fresh_before != before:
-            if fresh_before == value:
+
+        fresh = self._item_fields(item_id).get(field.name) or "<unset>"
+        if fresh != before:
+            if fresh == value:
                 self._state.record_outcome(effect.idempotency_key, "CONFIRMED")
                 return
             self._state.record_outcome(effect.idempotency_key, "NO_EFFECT")
             raise PlanningProjectionError("PROJECT_FIELD_STALE_PRECONDITION")
+
         command = [
             "gh",
             "project",
@@ -402,25 +387,6 @@ class GitHubPlanningProjectionAdapter:
                 return existing
         raise PlanningProjectionError("BOOTSTRAP_EFFECT_GENERATION_EXHAUSTED")
 
-    def _next_intent(
-        self,
-        registration: ProductDevelopmentRegistration,
-        *,
-        kind: str,
-        role: str,
-        target_identity: str,
-        expected_preconditions: tuple[tuple[str, str], ...],
-        expected_effect: tuple[tuple[str, str], ...],
-    ) -> BootstrapEffect:
-        return self._prepare_effect(
-            registration,
-            kind=kind,
-            role=role,
-            target_identity=target_identity,
-            expected_preconditions=expected_preconditions,
-            expected_effect=expected_effect,
-        )
-
     def _find_issue(self, repository: str, marker: str) -> _Issue | None:
         payload = self._run_json(
             (
@@ -441,9 +407,12 @@ class GitHubPlanningProjectionAdapter:
             raise PlanningProjectionError("ISSUE_LIST_INVALID")
         matches: list[_Issue] = []
         for raw in payload:
-            if not isinstance(raw, dict) or raw.get("body") is None:
+            if not isinstance(raw, dict):
                 continue
-            body, title, url, number = raw.get("body"), raw.get("title"), raw.get("url"), raw.get("number")
+            body = raw.get("body")
+            title = raw.get("title")
+            url = raw.get("url")
+            number = raw.get("number")
             if (
                 isinstance(body, str)
                 and marker in body
@@ -469,21 +438,33 @@ class GitHubPlanningProjectionAdapter:
                 "json",
             )
         )
-        if not isinstance(raw, dict) or not isinstance(raw.get("id"), str):
+        if not isinstance(raw, dict):
             raise PlanningProjectionError("PROJECT_ID_UNAVAILABLE")
-        return raw["id"]
+        project_id = raw.get("id")
+        if not isinstance(project_id, str) or not project_id:
+            raise PlanningProjectionError("PROJECT_ID_UNAVAILABLE")
+        return project_id
 
     def _project_fields(self, project_id: str) -> tuple[_ProjectField, ...]:
         query = (
             "query($project:ID!){node(id:$project){... on ProjectV2{fields(first:100){"
-            "nodes{... on ProjectV2Field{id name dataType} ... on ProjectV2SingleSelectField{"
-            "id name options{id name}}} pageInfo{hasNextPage}}}}}"
+            "nodes{... on ProjectV2Field{id name dataType} "
+            "... on ProjectV2SingleSelectField{id name options{id name}}} "
+            "pageInfo{hasNextPage}}}}}"
         )
         raw = self._run_json(
-            ("gh", "api", "graphql", "-f", f"query={query}", "-f", f"project={project_id}")
+            (
+                "gh",
+                "api",
+                "graphql",
+                "-f",
+                f"query={query}",
+                "-f",
+                f"project={project_id}",
+            )
         )
         fields = _nested(raw, "data", "node", "fields")
-        if fields.get("pageInfo", {}).get("hasNextPage") is True:
+        if _has_next_page(fields):
             raise PlanningProjectionError("PROJECT_FIELDS_PAGINATED")
         nodes = fields.get("nodes")
         if not isinstance(nodes, list):
@@ -492,34 +473,45 @@ class GitHubPlanningProjectionAdapter:
         for node in nodes:
             if not isinstance(node, dict):
                 continue
-            field_id, name = node.get("id"), node.get("name")
+            field_id = node.get("id")
+            name = node.get("name")
             if not isinstance(field_id, str) or not isinstance(name, str):
                 continue
             options_raw = node.get("options")
             if isinstance(options_raw, list):
-                options = tuple(
-                    (option["id"], option["name"])
-                    for option in options_raw
-                    if isinstance(option, dict)
-                    and isinstance(option.get("id"), str)
-                    and isinstance(option.get("name"), str)
-                )
-                result.append(_ProjectField(field_id, name, "SINGLE_SELECT", options))
-            else:
-                data_type = node.get("dataType")
-                result.append(_ProjectField(field_id, name, str(data_type or "UNKNOWN")))
+                options: list[tuple[str, str]] = []
+                for option in options_raw:
+                    if not isinstance(option, dict):
+                        continue
+                    option_id = option.get("id")
+                    option_name = option.get("name")
+                    if isinstance(option_id, str) and isinstance(option_name, str):
+                        options.append((option_id, option_name))
+                result.append(_ProjectField(field_id, name, "SINGLE_SELECT", tuple(options)))
+                continue
+            data_type = node.get("dataType")
+            kind = data_type if isinstance(data_type, str) else "UNKNOWN"
+            result.append(_ProjectField(field_id, name, kind))
         return tuple(result)
 
     def _find_project_item(self, project_id: str, issue_url: str) -> _ProjectItem | None:
         query = (
-            "query($project:ID!){node(id:$project){... on ProjectV2{items(first:100){nodes{"
-            "id content{... on Issue{url}}} pageInfo{hasNextPage}}}}}"
+            "query($project:ID!){node(id:$project){... on ProjectV2{items(first:100){"
+            "nodes{id content{... on Issue{url}}} pageInfo{hasNextPage}}}}}"
         )
         raw = self._run_json(
-            ("gh", "api", "graphql", "-f", f"query={query}", "-f", f"project={project_id}")
+            (
+                "gh",
+                "api",
+                "graphql",
+                "-f",
+                f"query={query}",
+                "-f",
+                f"project={project_id}",
+            )
         )
         items = _nested(raw, "data", "node", "items")
-        if items.get("pageInfo", {}).get("hasNextPage") is True:
+        if _has_next_page(items):
             raise PlanningProjectionError("PROJECT_ITEMS_PAGINATED")
         nodes = items.get("nodes")
         if not isinstance(nodes, list):
@@ -528,12 +520,12 @@ class GitHubPlanningProjectionAdapter:
         for node in nodes:
             if not isinstance(node, dict):
                 continue
-            item_id, content = node.get("id"), node.get("content")
-            if (
-                isinstance(item_id, str)
-                and isinstance(content, dict)
-                and content.get("url") == issue_url
-            ):
+            item_id = node.get("id")
+            content = node.get("content")
+            if not isinstance(content, dict):
+                continue
+            observed_url = content.get("url")
+            if isinstance(item_id, str) and observed_url == issue_url:
                 matches.append(_ProjectItem(item_id, issue_url))
         if len(matches) > 1:
             raise PlanningProjectionError("PROJECT_ITEM_CONFLICT")
@@ -541,16 +533,26 @@ class GitHubPlanningProjectionAdapter:
 
     def _item_fields(self, item_id: str) -> dict[str, str]:
         query = (
-            "query($item:ID!){node(id:$item){... on ProjectV2Item{fieldValues(first:100){nodes{"
-            "... on ProjectV2ItemFieldTextValue{text field{... on ProjectV2FieldCommon{name}}} "
-            "... on ProjectV2ItemFieldSingleSelectValue{name field{... on ProjectV2FieldCommon{name}}}"
-            "} pageInfo{hasNextPage}}}}}"
+            "query($item:ID!){node(id:$item){... on ProjectV2Item{"
+            "fieldValues(first:100){nodes{"
+            "... on ProjectV2ItemFieldTextValue{text field{"
+            "... on ProjectV2FieldCommon{name}}} "
+            "... on ProjectV2ItemFieldSingleSelectValue{name field{"
+            "... on ProjectV2FieldCommon{name}}}} pageInfo{hasNextPage}}}}}"
         )
         raw = self._run_json(
-            ("gh", "api", "graphql", "-f", f"query={query}", "-f", f"item={item_id}")
+            (
+                "gh",
+                "api",
+                "graphql",
+                "-f",
+                f"query={query}",
+                "-f",
+                f"item={item_id}",
+            )
         )
         values = _nested(raw, "data", "node", "fieldValues")
-        if values.get("pageInfo", {}).get("hasNextPage") is True:
+        if _has_next_page(values):
             raise PlanningProjectionError("PROJECT_ITEM_FIELDS_PAGINATED")
         nodes = values.get("nodes")
         if not isinstance(nodes, list):
@@ -560,11 +562,16 @@ class GitHubPlanningProjectionAdapter:
             if not isinstance(node, dict):
                 continue
             field = node.get("field")
-            if not isinstance(field, dict) or not isinstance(field.get("name"), str):
+            if not isinstance(field, dict):
                 continue
-            value = node.get("text") if isinstance(node.get("text"), str) else node.get("name")
+            field_name = field.get("name")
+            if not isinstance(field_name, str):
+                continue
+            text_value = node.get("text")
+            select_value = node.get("name")
+            value = text_value if isinstance(text_value, str) else select_value
             if isinstance(value, str):
-                result[field["name"]] = value
+                result[field_name] = value
         return result
 
     def _run_json(self, command: Sequence[str]) -> object:
@@ -651,13 +658,22 @@ def _work_body(
 
 
 def _title(goal_text: str) -> str:
-    return next((line.strip() for line in goal_text.splitlines() if line.strip()), "Product Goal")[:120]
+    first = next(
+        (line.strip() for line in goal_text.splitlines() if line.strip()),
+        "Product Goal",
+    )
+    return first[:120]
 
 
 def _nested(raw: object, *keys: str) -> Mapping[str, object]:
-    current: object = raw
+    current = raw
     for key in keys:
         if not isinstance(current, dict):
             return {}
         current = current.get(key)
     return current if isinstance(current, dict) else {}
+
+
+def _has_next_page(value: Mapping[str, object]) -> bool:
+    page_info = value.get("pageInfo")
+    return isinstance(page_info, dict) and page_info.get("hasNextPage") is True
