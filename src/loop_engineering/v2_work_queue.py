@@ -9,11 +9,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol
 
-from .v2_execution_state import V2ExecutionStateStore
 from .v2_goal_planning import ProductDevelopmentRegistration
 from .v2_supervisor import EvidenceState, V2WorkObservation
-from .v2_work_definition import GitHubWorkDefinitionAdapter, WorkDefinitionSnapshot
-from .work_state import PostgreSQLWorkStateStore, WorkRecord, WorkStateUnavailable
+from .v2_work_definition import WorkDefinitionSnapshot
+from .work_state import RecoveredWork, WorkRecord
 
 
 class WorkQueueUnavailable(RuntimeError):
@@ -22,6 +21,22 @@ class WorkQueueUnavailable(RuntimeError):
 
 class WorkQueueCommandRunner(Protocol):
     def run(self, args: Sequence[str]) -> str: ...
+
+
+class WorkDefinitionReaderPort(Protocol):
+    def snapshot(self, repository: str, issue_number: int) -> WorkDefinitionSnapshot | None: ...
+
+
+class ExecutionStatePort(Protocol):
+    def work_record(self, work_identity: str) -> WorkRecord | None: ...
+
+    def migrate_candidate(self, record: WorkRecord) -> bool: ...
+
+
+class WorkStatePort(Protocol):
+    def upsert_work(self, record: WorkRecord) -> None: ...
+
+    def recover(self, work_identity: str) -> RecoveredWork | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,9 +52,9 @@ class GitHubV2WorkQueue:
     def __init__(
         self,
         runner: WorkQueueCommandRunner,
-        definitions: GitHubWorkDefinitionAdapter,
-        execution_state: V2ExecutionStateStore,
-        work_state: PostgreSQLWorkStateStore,
+        definitions: WorkDefinitionReaderPort,
+        execution_state: ExecutionStatePort,
+        work_state: WorkStatePort,
     ) -> None:
         self._runner = runner
         self._definitions = definitions
@@ -52,7 +67,7 @@ class GitHubV2WorkQueue:
         current: list[str] = []
         pending_effect = False
 
-        for logical_key, issue_number in issue_keys:
+        for _, issue_number in issue_keys:
             definition = self._definitions.snapshot(
                 registration.repository_identity,
                 issue_number,
@@ -92,7 +107,6 @@ class GitHubV2WorkQueue:
 
             observations.append(
                 _observation(
-                    logical_key=logical_key,
                     definition=definition,
                     record=record,
                     canonical_design_identities=(
@@ -171,13 +185,11 @@ class GitHubV2WorkQueue:
 
 def _observation(
     *,
-    logical_key: str,
     definition: WorkDefinitionSnapshot,
     record: WorkRecord,
     canonical_design_identities: tuple[str, ...],
     unresolved_conflict: bool,
 ) -> V2WorkObservation:
-    del logical_key
     return V2WorkObservation(
         work_identity=record.identity,
         issue_number=record.issue_number,
