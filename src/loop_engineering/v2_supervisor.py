@@ -43,6 +43,7 @@ class V2WorkObservation:
     issue_number: int
     issue_revision: str
     issue_state: str
+    lifecycle: str
     project_status: str | None
     priority: str | None
     dependency_states: tuple[str, ...]
@@ -68,7 +69,7 @@ class V2WorkObservation:
 
     @property
     def terminal(self) -> bool:
-        return self.issue_state == "CLOSED" or self.merged
+        return self.lifecycle == "COMPLETED" and self.issue_state == "CLOSED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,7 +190,11 @@ def derive_transition(work: V2WorkObservation) -> V2Transition | None:
     if work.unresolved_conflict or not work.dependency_ready:
         return None
     if work.terminal:
-        return V2Transition.COMPLETE_WORK if work.issue_state != "CLOSED" else None
+        return None
+    if work.merged:
+        return V2Transition.COMPLETE_WORK
+    if work.lifecycle == "COMPLETED" or work.issue_state == "CLOSED":
+        return None
     if not work.acceptance_digest:
         return None
     if not work.canonical_design_identities:
@@ -234,6 +239,8 @@ def schedule_key(
         "goal_revision": goal_revision,
         "work_identity": work.work_identity,
         "issue_revision": work.issue_revision,
+        "issue_state": work.issue_state,
+        "lifecycle": work.lifecycle,
         "project_status": work.project_status,
         "priority": work.priority,
         "dependency_states": work.dependency_states,
