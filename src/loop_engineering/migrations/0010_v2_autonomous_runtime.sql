@@ -15,6 +15,14 @@ CREATE TABLE IF NOT EXISTS loop_autonomous_runtimes (
     UNIQUE (product_key, repository, goal_revision)
 );
 
+CREATE TABLE IF NOT EXISTS loop_goal_plans (
+    runtime_identity TEXT PRIMARY KEY REFERENCES loop_autonomous_runtimes(runtime_identity),
+    proposal_identity TEXT NOT NULL,
+    proposal_json JSONB NOT NULL,
+    projection_json JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS loop_autonomous_dispatches (
     schedule_key TEXT PRIMARY KEY,
     runtime_identity TEXT NOT NULL REFERENCES loop_autonomous_runtimes(runtime_identity),
