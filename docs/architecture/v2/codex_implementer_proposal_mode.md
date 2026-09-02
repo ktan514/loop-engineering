@@ -134,6 +134,8 @@ Codex promptはTaskPacketから構築し、次を固定で含める。
 - `design_targets_changed[]`
 - `diff_check_passed`
 
+`patch_text` は `git diff --cached --binary --no-ext-diff HEAD` が返したraw UTF-8 textをtrim・改行正規化せず保持する。`patch_sha256` はそのraw textをUTF-8 encodeしたbyte列に対して計算する。patch本文を表示用文字列処理で変形してはならない。
+
 成功条件:
 
 - Codex process success
@@ -175,6 +177,7 @@ source Workspaceは実行前後でHEAD / branch / clean stateが変化してい�
 - CodexがGit commit/push/PRを行っていないことをreadbackできる。
 - scope逸脱を拒否できる。
 - Reviewer/GitHub/DB credentialをCodexへ渡さない。
+- ChangeProposalのraw patch本文とSHA-256 identityを無加工で一致させる。
 - failure時に隔離worktreeを残さない。
 - source Workspaceを変更しない。
 - tests / exact-head CIがPASSする。
