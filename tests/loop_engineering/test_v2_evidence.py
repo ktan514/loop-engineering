@@ -1,9 +1,10 @@
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from loop_engineering.v2_evidence import (
+    EvidenceBundle,
     EvidenceTarget,
     GitHubExactHeadCIAdapter,
     GitHubHumanVerificationAdapter,
@@ -39,8 +40,8 @@ class FakeDatabase:
 
     def execute_sql(self, sql: str) -> bool:
         if sql.startswith("INSERT INTO loop_review_evidence"):
-            key = _sql_value(sql, "VALUES ('", "', '")
             values = _quoted_values(sql)
+            key = values[0]
             self.rows.setdefault(
                 key,
                 {
@@ -186,7 +187,7 @@ def test_review_request_key_changes_with_head() -> None:
     item = target()
     first = review_request_key(item, "ci:1", "policy-v1")
     second = review_request_key(
-        EvidenceTarget(**{**item.__dict__, "head_sha": "b" * 40}),
+        replace(item, head_sha="b" * 40),
         "ci:1",
         "policy-v1",
     )
@@ -215,15 +216,12 @@ def test_request_changes_returns_supervisor_to_repair() -> None:
     coordinator = review_components(runner, FakeDatabase())
     ci = MachineEvidence(EvidenceState.PASS, "ci:10")
     review = coordinator.ensure_review(item, ci)
-    observation = work()
-    observation = V2WorkObservation(
-        **{
-            **observation.__dict__,
-            "verification_state": EvidenceState.PASS,
-            "verification_identity": "ci:10",
-            "review_state": review.state,
-            "review_identity": review.identity,
-        }
+    observation = replace(
+        work(),
+        verification_state=EvidenceState.PASS,
+        verification_identity="ci:10",
+        review_state=review.state,
+        review_identity=review.identity,
     )
 
     assert review.state is EvidenceState.REQUEST_CHANGES
@@ -297,12 +295,9 @@ def test_old_head_human_pass_is_not_current_pass() -> None:
 
 def test_apply_evidence_requires_same_head() -> None:
     item = target()
-    bundle_ci = MachineEvidence(EvidenceState.PASS, "ci")
-    from loop_engineering.v2_evidence import EvidenceBundle
-
     bundle = EvidenceBundle(
         item,
-        bundle_ci,
+        MachineEvidence(EvidenceState.PASS, "ci"),
         MachineEvidence(EvidenceState.PASS, "review"),
         MachineEvidence(EvidenceState.NOT_REQUIRED, None),
     )
@@ -320,7 +315,7 @@ def _quoted_values(sql: str) -> list[str]:
             index += 1
             continue
         index += 1
-        current = []
+        current: list[str] = []
         while index < len(sql):
             if sql[index] == "'" and index + 1 < len(sql) and sql[index + 1] == "'":
                 current.append("'")
@@ -333,7 +328,3 @@ def _quoted_values(sql: str) -> list[str]:
             index += 1
         values.append("".join(current))
     return values
-
-
-def _sql_value(sql: str, start: str, end: str) -> str:
-    return sql.split(start, 1)[1].split(end, 1)[0]
