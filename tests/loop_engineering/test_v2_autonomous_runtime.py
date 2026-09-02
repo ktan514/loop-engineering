@@ -47,9 +47,13 @@ class FakeDatabase:
             identity = values[-1]
             row = self.runtimes[identity]
             row["status"] = values[0]
-            row["current_work_identity"] = None if "current_work_identity = NULL" in sql else values[1]
+            row["current_work_identity"] = (
+                None if "current_work_identity = NULL" in sql else values[1]
+            )
             offset = 1 if row["current_work_identity"] is None else 2
-            row["last_schedule_key"] = None if "last_schedule_key = NULL" in sql else values[offset]
+            row["last_schedule_key"] = (
+                None if "last_schedule_key = NULL" in sql else values[offset]
+            )
             if row["last_schedule_key"] is not None:
                 offset += 1
             row["last_progress_fingerprint"] = (
