@@ -177,7 +177,10 @@ class CodexProposalImplementer:
         before_head = self._git_output(worktree, ("rev-parse", "HEAD"))
         branch = self._git_output(worktree, ("branch", "--show-current"))
         if before_head != packet.exact_base_sha or branch is None or branch.strip():
-            return ImplementerResult(ImplementerStatus.BLOCKED, "ISOLATED_WORKTREE_IDENTITY_INVALID")
+            return ImplementerResult(
+                ImplementerStatus.BLOCKED,
+                "ISOLATED_WORKTREE_IDENTITY_INVALID",
+            )
 
         codex = self._runner.run(
             (*self._codex_argv_prefix, _instruction(packet)),
