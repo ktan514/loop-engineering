@@ -65,8 +65,12 @@ class GitHubWorkDefinitionAdapter:
         self._runner = runner
         self._project_number = project_number
 
+    def snapshot(self, repository: str, issue_number: int) -> WorkDefinitionSnapshot | None:
+        """本文自然文を解析せず、Issue / Projectのtyped definitionを返す。"""
+        return self._snapshot(repository, issue_number)
+
     def synchronize(self, current: WorkRecord) -> WorkDefinitionResult:
-        snapshot = self._snapshot(current.repository, current.issue_number)
+        snapshot = self.snapshot(current.repository, current.issue_number)
         if snapshot is None:
             return WorkDefinitionResult(WorkDefinitionStatus.UNAVAILABLE)
         if snapshot.issue_state == "CLOSED" and current.lifecycle != "COMPLETED":
@@ -195,20 +199,21 @@ def _dependencies(issue: Mapping[str, object]) -> tuple[tuple[str, ...], tuple[s
     blocked_value = issue.get("blockedBy")
     if not isinstance(blocked_value, dict):
         return None
-    blocked_by = blocked_value
-    page_info = blocked_by.get("pageInfo")
-    nodes = blocked_by.get("nodes")
+    page_info = blocked_value.get("pageInfo")
+    nodes = blocked_value.get("nodes")
     if not isinstance(page_info, dict) or not isinstance(page_info.get("hasNextPage"), bool):
         return None
     if page_info["hasNextPage"]:
         return None
     if not isinstance(nodes, list):
         return None
-    candidates = [node for node in nodes if isinstance(node, dict)]
     identities: list[str] = []
     states: list[str] = []
-    for candidate in candidates:
-        number, state = candidate.get("number"), candidate.get("state")
+    for candidate in nodes:
+        if not isinstance(candidate, dict):
+            continue
+        number = candidate.get("number")
+        state = candidate.get("state")
         dependency_repository = _mapping(candidate, "repository").get("nameWithOwner")
         if isinstance(number, int) and isinstance(state, str):
             identities.append(
