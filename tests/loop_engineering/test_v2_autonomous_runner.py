@@ -26,7 +26,12 @@ from loop_engineering.v2_goal_planning import (
     WorkPlanProposal,
     proposal_identity,
 )
-from loop_engineering.v2_supervisor import EvidenceState, V2Supervisor, V2WorkObservation
+from loop_engineering.v2_supervisor import (
+    EvidenceState,
+    V2Supervisor,
+    V2SupervisorDecision,
+    V2WorkObservation,
+)
 from loop_engineering.v2_work_queue import V2WorkQueueSnapshot
 
 
@@ -36,7 +41,10 @@ class MemoryRuntime(PostgreSQLAutonomousRuntimeStore):
         self.dispatches: dict[str, AutonomousDispatch] = {}
         self.saved_plan: BootstrapResult | None = None
 
-    def ensure_runtime(self, registration: ProductDevelopmentRegistration) -> AutonomousRuntimeState:
+    def ensure_runtime(
+        self,
+        registration: ProductDevelopmentRegistration,
+    ) -> AutonomousRuntimeState:
         if self.state is None:
             self.state = AutonomousRuntimeState(
                 runtime_identity(registration),
@@ -63,7 +71,8 @@ class MemoryRuntime(PostgreSQLAutonomousRuntimeStore):
         no_progress_count: int,
         detail: str,
     ) -> AutonomousRuntimeState:
-        assert self.state is not None and self.state.runtime_identity == runtime_identity_value
+        assert self.state is not None
+        assert self.state.runtime_identity == runtime_identity_value
         self.state = AutonomousRuntimeState(
             self.state.runtime_identity,
             self.state.product_key,
@@ -118,7 +127,10 @@ class MutableQueue:
         self.current = current
         self.pending_effect = False
 
-    def synchronize(self, registration: ProductDevelopmentRegistration) -> V2WorkQueueSnapshot:
+    def synchronize(
+        self,
+        registration: ProductDevelopmentRegistration,
+    ) -> V2WorkQueueSnapshot:
         del registration
         return V2WorkQueueSnapshot(self.works, self.current, self.pending_effect)
 
@@ -147,16 +159,26 @@ class PassEvidence(EvidenceEnricher):
         snapshot: _LineageSnapshot,
         planned: PlannedWork,
     ) -> V2WorkObservation:
-        del registration, planned
-        return snapshot.observation
+        del registration
+        return replace(
+            snapshot.observation,
+            human_verification_required=planned.human_verification_required,
+        )
 
 
 class RecordingTransitions:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def execute(self, registration, bootstrap, work, planned_work, decision):
-        del registration, bootstrap, planned_work, decision
+    def execute(
+        self,
+        registration: ProductDevelopmentRegistration,
+        bootstrap_result: BootstrapResult,
+        work: V2WorkObservation,
+        planned_work: PlannedWork,
+        decision: V2SupervisorDecision,
+    ) -> TransitionExecutionResult:
+        del registration, bootstrap_result, planned_work, decision
         self.calls.append(work.work_identity)
         return TransitionExecutionResult(TransitionExecutionStatus.PROGRESSED, "ok")
 
@@ -182,8 +204,20 @@ def registration() -> ProductDevelopmentRegistration:
 def bootstrap() -> BootstrapResult:
     reg = registration()
     works = (
-        PlannedWork("first", "First", "p1", ("done1",), canonical_design_targets=("docs/a.md",)),
-        PlannedWork("second", "Second", "p2", ("done2",), canonical_design_targets=("docs/b.md",)),
+        PlannedWork(
+            "first",
+            "First",
+            "p1",
+            ("done1",),
+            canonical_design_targets=("docs/a.md",),
+        ),
+        PlannedWork(
+            "second",
+            "Second",
+            "p2",
+            ("done2",),
+            canonical_design_targets=("docs/b.md",),
+        ),
     )
     proposal = WorkPlanProposal(
         proposal_identity(reg, works),
@@ -205,8 +239,8 @@ def bootstrap() -> BootstrapResult:
     )
 
 
-def observation(issue: int, **changes) -> V2WorkObservation:
-    base = V2WorkObservation(
+def observation(issue: int) -> V2WorkObservation:
+    return V2WorkObservation(
         work_identity=f"work:owner/sample:{issue}",
         issue_number=issue,
         issue_revision=f"r{issue}",
@@ -217,10 +251,9 @@ def observation(issue: int, **changes) -> V2WorkObservation:
         dependency_states=(),
         acceptance_digest=f"d{issue}",
     )
-    return replace(base, **changes)
 
 
-def runner(
+def application(
     runtime: MemoryRuntime,
     queue: MutableQueue,
     transitions: RecordingTransitions,
@@ -237,9 +270,10 @@ def runner(
 
 
 def test_waiting_current_work_does_not_block_second_work() -> None:
-    waiting = observation(
-        2,
+    waiting = replace(
+        observation(2),
         lifecycle="RUNNING",
+        selected_transition="IMPLEMENT",
         canonical_design_identities=("design:a",),
         exact_head_sha="a" * 40,
         active_lineage_identity="pr:7",
@@ -248,10 +282,13 @@ def test_waiting_current_work_does_not_block_second_work() -> None:
     second = observation(3)
     runtime = MemoryRuntime()
     transitions = RecordingTransitions()
-
-    result = runner(runtime, MutableQueue((waiting, second), waiting.work_identity), transitions).run(
-        registration(), max_iterations=1
+    app = application(
+        runtime,
+        MutableQueue((waiting, second), waiting.work_identity),
+        transitions,
     )
+
+    result = app.run(registration(), max_iterations=1)
 
     assert result.status is AutonomousRunStatus.PROGRESSED
     assert transitions.calls == [second.work_identity]
@@ -259,7 +296,7 @@ def test_waiting_current_work_does_not_block_second_work() -> None:
 
 def test_restart_suppresses_same_schedule_and_selects_other_work() -> None:
     first = observation(2)
-    second = observation(3, priority="P2")
+    second = replace(observation(3), priority="P2")
     runtime = MemoryRuntime()
     state = runtime.ensure_runtime(registration())
     from loop_engineering.v2_supervisor import V2Transition, schedule_key
@@ -275,18 +312,22 @@ def test_restart_suppresses_same_schedule_and_selects_other_work() -> None:
     )
     transitions = RecordingTransitions()
 
-    runner(runtime, MutableQueue((first, second)), transitions).run(registration(), max_iterations=1)
+    application(runtime, MutableQueue((first, second)), transitions).run(
+        registration(),
+        max_iterations=1,
+    )
 
     assert transitions.calls == [second.work_identity]
 
 
 def test_all_completed_works_complete_goal() -> None:
-    completed1 = observation(2, issue_state="CLOSED", lifecycle="COMPLETED")
-    completed2 = observation(3, issue_state="CLOSED", lifecycle="COMPLETED")
+    completed1 = replace(observation(2), issue_state="CLOSED", lifecycle="COMPLETED")
+    completed2 = replace(observation(3), issue_state="CLOSED", lifecycle="COMPLETED")
     runtime = MemoryRuntime()
     transitions = RecordingTransitions()
+    app = application(runtime, MutableQueue((completed1, completed2)), transitions)
 
-    result = runner(runtime, MutableQueue((completed1, completed2)), transitions).run(registration())
+    result = app.run(registration())
 
     assert result.status is AutonomousRunStatus.GOAL_COMPLETED
     assert transitions.calls == []
@@ -294,22 +335,20 @@ def test_all_completed_works_complete_goal() -> None:
 
 
 def test_pending_effect_escalates_only_after_repeated_same_state() -> None:
-    blocked = observation(2, dependency_states=("OPEN",))
+    blocked = replace(observation(2), dependency_states=("OPEN",))
     runtime = MemoryRuntime()
     queue = MutableQueue((blocked,))
     queue.pending_effect = True
-    transitions = RecordingTransitions()
-    app = runner(runtime, queue, transitions)
+    app = application(runtime, queue, RecordingTransitions())
 
-    first = app.run(registration())
-    second = app.run(registration())
-    third = app.run(registration())
-    fourth = app.run(registration())
+    results = [app.run(registration()) for _ in range(4)]
 
-    assert first.status is AutonomousRunStatus.WAITING
-    assert second.status is AutonomousRunStatus.WAITING
-    assert third.status is AutonomousRunStatus.WAITING
-    assert fourth.status is AutonomousRunStatus.INTERVENTION_REQUIRED
+    assert [item.status for item in results[:3]] == [
+        AutonomousRunStatus.WAITING,
+        AutonomousRunStatus.WAITING,
+        AutonomousRunStatus.WAITING,
+    ]
+    assert results[3].status is AutonomousRunStatus.INTERVENTION_REQUIRED
 
 
 def _pr_number(identity: str | None) -> int | None:
