@@ -1,5 +1,3 @@
-from dataclasses import replace
-
 from loop_engineering.v2_supervisor import (
     EvidenceState,
     V2Supervisor,
@@ -11,19 +9,40 @@ from loop_engineering.v2_supervisor import (
 )
 
 
-def work(issue: int, **overrides: object) -> V2WorkObservation:
-    base = V2WorkObservation(
+def work(
+    issue: int,
+    *,
+    issue_state: str = "OPEN",
+    lifecycle: str = "PLANNED",
+    project_status: str | None = "Backlog",
+    priority: str | None = "P1",
+    dependency_states: tuple[str, ...] = (),
+    canonical_design_identities: tuple[str, ...] = (),
+    exact_head_sha: str | None = None,
+    verification_state: EvidenceState = EvidenceState.NOT_RUN,
+    review_state: EvidenceState = EvidenceState.NOT_RUN,
+    human_verification_required: bool = False,
+    human_verification_state: EvidenceState = EvidenceState.NOT_REQUIRED,
+    unresolved_conflict: bool = False,
+) -> V2WorkObservation:
+    return V2WorkObservation(
         work_identity=f"work:owner/repo:{issue}",
         issue_number=issue,
         issue_revision=f"definition:{issue}",
-        issue_state="OPEN",
-        lifecycle="PLANNED",
-        project_status="Backlog",
-        priority="P1",
-        dependency_states=(),
+        issue_state=issue_state,
+        lifecycle=lifecycle,
+        project_status=project_status,
+        priority=priority,
+        dependency_states=dependency_states,
         acceptance_digest=f"digest:{issue}",
+        canonical_design_identities=canonical_design_identities,
+        exact_head_sha=exact_head_sha,
+        verification_state=verification_state,
+        review_state=review_state,
+        human_verification_required=human_verification_required,
+        human_verification_state=human_verification_state,
+        unresolved_conflict=unresolved_conflict,
     )
-    return replace(base, **overrides)
 
 
 def test_missing_design_selects_design_transition() -> None:
