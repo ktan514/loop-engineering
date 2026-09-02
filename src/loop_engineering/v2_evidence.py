@@ -191,8 +191,8 @@ class GitHubExactHeadCIAdapter:
             candidates.append(raw)
         if not candidates:
             return MachineEvidence(EvidenceState.NOT_RUN, None)
-        latest = max(candidates, key=lambda item: int(item["id"]))
-        run_id = latest["id"]
+        latest = max(candidates, key=_ci_run_id)
+        run_id = _ci_run_id(latest)
         identity = f"ci:{run_id}:{target.head_sha}"
         if latest.get("status") != "completed":
             return MachineEvidence(EvidenceState.PENDING, identity)
@@ -531,6 +531,13 @@ def _valid_target(target: EvidenceTarget) -> bool:
         and bool(target.base_branch)
         and bool(target.acceptance_digest)
     )
+
+
+def _ci_run_id(item: Mapping[str, object]) -> int:
+    value = item.get("id")
+    if not isinstance(value, int):
+        raise RuntimeError("CI_EVIDENCE_ROW_INVALID")
+    return value
 
 
 def _literal(value: str) -> str:
