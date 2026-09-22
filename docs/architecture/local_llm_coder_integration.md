@@ -602,4 +602,3 @@ Issueは変更を実装するRepositoryへ作成する。
 将来`local-llm-coder`固有の独立ロードマップが大きくなり専用Projectを設ける場合も、Project #9を統合Authorityとして維持し、専用ProjectはBackend内部計画に限定する。統合Workの状態を二つのProjectで別々のAuthorityとして管理しない。
 
 Repository間の結合はsource copy、subdirectory化、submodule化ではなく、versioned Adapter / CLI / structured request-result contractで行う。
-
