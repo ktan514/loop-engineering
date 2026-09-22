@@ -182,6 +182,38 @@ Worker roleごとにtarget identityの意味を混同しない。
 
 既存`ChangeProposal.exact_base_sha` / `patch_sha256`と、`ReviewTarget.head_identity` / `change_identity`の区別を維持する。
 
+### 3.2 Workspace identity
+
+Loop Engineeringと`local-llm-coder`が同一Workに対して別cloneを暗黙に使用してはならない。
+
+local-llm-coder Backendを選択するWorkでは、Loop Engineeringの`workspace_path`とlocal-llm-coderが解決したActive Productionのcanonical pathが一致することをpreflight条件とする。
+
+初期統合では既存のlocal-llm-coder境界を維持し、対象Workspaceはlocal-llm-coder Control Planeの`productions/<production-name>`直下へ登録する。
+
+Loop Engineering側のBackend設定は最低限次を持つ。
+
+```text
+local_llm_coder_root
+production_name
+model_profile
+```
+
+Adapterは次を照合する。
+
+```text
+Loop Engineering workspace_path
+==
+resolve(local_llm_coder_root / productions / production_name)
+==
+local-llm-coder preflightのActive Production
+```
+
+不一致ならWorkerを起動せずfail-closedする。
+
+これにより、Loop EngineeringのGit readback / lineage / exact HEADと、local-llm-coderが実際に編集・レビューするWorkspaceが同一になる。
+
+将来local-llm-coderが任意external Workspace registrationを正式に持つ場合はこのPort実装を交換できるが、canonical Workspace identity一致のinvariantは維持する。
+
 ## 4. Completion Contract
 
 Workerは自由文を返しただけでは完了にならない。roleごとに必須fieldを満たした構造化結果が必要である。
@@ -377,6 +409,21 @@ Loop Engineeringは`local-main`の実Ollama model名を知らない。
 
 Repositoryにはexample/schemaだけを保存し、実環境profileはlocal設定とする。
 
+#### 7.2.1 設定ファイルpath
+
+初期実装では次を標準とする。
+
+```text
+config/local-profiles.example.json  # Git管理するtemplate
+config/local-profiles.json          # Git管理外の実環境設定
+```
+
+`config/local-profiles.json`を`.gitignore`対象とする。
+
+一時的に別設定を使用する場合だけ`LOCAL_LLM_CODER_PROFILE_CONFIG`でprofile設定ファイルpathを指定できる。通常経路のAuthorityは`config/local-profiles.json`とする。
+
+profileには秘密情報の実値を保存しない。credentialが必要なproviderでは環境変数名だけを参照する。
+
 `config/opencode.json`は固定modelの正本ではなくruntime templateとし、selected profileからmanaged runtime `opencode.json`を生成する。
 
 provider/model/endpoint変更だけでLoop Engineering Core state machineを変更しない。
@@ -391,6 +438,36 @@ Loop Engineeringからの通常呼出しではTUI操作を前提にしない。
 - Automation backend: typed requestを受け、Workerを実行し、structured resultを返して終了
 
 Automation backendは標準出力の自然文解析をControl Plane契約にしない。結果はJSON等のversioned schemaで返す。
+
+### 8.1 Automation CLI
+
+初期Adapter契約はfile-based request/resultとする。標準出力はdiagnostic専用で、machine result Authorityにしない。
+
+概念CLI:
+
+```text
+./scripts/run-worker.sh <production-name> \
+  --request <request.json> \
+  --result <result.json>
+```
+
+Shell wrapperは引数検証とPython entrypoint呼出しだけに限定し、Worker制御実装は`src/`配下のPythonへ置く。
+
+request/resultはversioned schemaを持ち、atomic write後にresult pathをreadbackする。
+
+最低限:
+
+```text
+schema_version
+request_identity
+task_packet_identity
+role
+status
+completion
+diagnostics
+```
+
+result file不存在、不正JSON、schema不一致、identity不一致、途中書込は`INCOMPLETE`または`FAILED`として扱い、PASSにしない。
 
 OpenCode固有command lineはAdapter内部へ閉じ込める。
 
