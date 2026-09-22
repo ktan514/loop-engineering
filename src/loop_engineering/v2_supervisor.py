@@ -54,6 +54,8 @@ class V2WorkObservation:
     exact_head_sha: str | None = None
     verification_state: EvidenceState = EvidenceState.NOT_RUN
     verification_identity: str | None = None
+    ci_state: EvidenceState = EvidenceState.NOT_RUN
+    ci_identity: str | None = None
     review_state: EvidenceState = EvidenceState.NOT_RUN
     review_identity: str | None = None
     human_verification_required: bool = False
@@ -212,6 +214,12 @@ def derive_transition(work: V2WorkObservation) -> V2Transition | None:
         return None
     if work.verification_state is not EvidenceState.PASS:
         return V2Transition.REPAIR
+    if work.ci_state is EvidenceState.FAIL:
+        return V2Transition.REPAIR
+    if work.ci_state in {EvidenceState.NOT_RUN, EvidenceState.PENDING}:
+        return None
+    if work.ci_state is not EvidenceState.PASS:
+        return V2Transition.REPAIR
     if work.review_state in {EvidenceState.FAIL, EvidenceState.REQUEST_CHANGES}:
         return V2Transition.REPAIR
     if work.review_state is EvidenceState.NOT_RUN:
@@ -253,6 +261,7 @@ def schedule_key(
         "active_lineage_identity": work.active_lineage_identity,
         "exact_head_sha": work.exact_head_sha,
         "verification": (work.verification_state.value, work.verification_identity),
+        "ci": (work.ci_state.value, work.ci_identity),
         "review": (work.review_state.value, work.review_identity),
         "human_verification": (
             work.human_verification_state.value,

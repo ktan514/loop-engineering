@@ -16,6 +16,7 @@ from .v2_autonomous_runtime import (
     PostgreSQLAutonomousRuntimeStore,
     runtime_identity,
 )
+from .v2_evidence import EvidenceTarget, GitHubExactHeadCIAdapter
 from .v2_external_review import ExternalReviewState
 from .v2_goal_planning import (
     BootstrapResult,
@@ -251,6 +252,10 @@ class ExternalReviewStateReader(Protocol):
     def get(self, work_identity: str) -> ExternalReviewState | None: ...
 
 
+class ExactHeadCIPort(Protocol):
+    def read(self, target: EvidenceTarget, workflow_name: str): ...
+
+
 class EvidenceEnricher:
     """durable Local/External Gateをcurrent PR headへbindしてSupervisorへ投影する。"""
 
@@ -258,9 +263,11 @@ class EvidenceEnricher:
         self,
         local_quality: LocalQualityStateReader,
         external_review: ExternalReviewStateReader,
+        ci: GitHubExactHeadCIAdapter,
     ) -> None:
         self._local_quality = local_quality
         self._external_review = external_review
+        self._ci = ci
 
     def enrich(
         self,
@@ -304,6 +311,18 @@ class EvidenceEnricher:
             elif local.stage is LocalQualityStage.BLOCKED:
                 unresolved = True
 
+        ci_target = EvidenceTarget(
+            repository=registration.repository_identity,
+            work_identity=work.work_identity,
+            issue_number=work.issue_number,
+            pr_number=snapshot.pr_number,
+            head_sha=work.exact_head_sha,
+            base_branch=registration.trunk_branch,
+            canonical_design_identities=work.canonical_design_identities,
+            acceptance_digest=work.acceptance_digest or "",
+        )
+        ci = self._ci.read(ci_target, registration.ci_workflow_name)
+
         review_state = EvidenceState.NOT_RUN
         review_identity: str | None = None
         if local_pass is not None:
@@ -333,6 +352,8 @@ class EvidenceEnricher:
             work,
             verification_state=verification_state,
             verification_identity=verification_identity,
+            ci_state=ci.state,
+            ci_identity=ci.identity,
             review_state=review_state,
             review_identity=review_identity,
             unresolved_conflict=unresolved,

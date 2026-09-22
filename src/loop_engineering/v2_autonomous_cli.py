@@ -27,6 +27,7 @@ from .v2_development_lineage import (
     TrustedProposalMaterializer,
 )
 from .v2_execution_state import V2ExecutionStateStore
+from .v2_evidence import GitHubExactHeadCIAdapter
 from .v2_external_review import (
     ExternalReviewCoordinator,
     OpenAICompatibleExternalReviewer,
@@ -155,7 +156,11 @@ def run_autonomous(
 
     local_store = PostgreSQLLocalQualityStore(database)
     external_store = PostgreSQLExternalReviewStore(database)
-    evidence = EvidenceEnricher(local_store, external_store)
+    evidence = EvidenceEnricher(
+        local_store,
+        external_store,
+        GitHubExactHeadCIAdapter(runner, environment),
+    )
 
     implementer = build_implementer_backend(settings, runner, environment)
     local_reviewer = LocalLlmCoderReviewerAdapter(

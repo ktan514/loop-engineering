@@ -29,6 +29,7 @@ from .v2_external_review import (
 from .v2_goal_planning import BootstrapResult, PlannedWork, ProductDevelopmentRegistration
 from .v2_implementer import (
     DevelopmentTaskPacket,
+    ImplementerFinding,
     ImplementerStatus,
     ImplementerTransition,
     V2ImplementerPort,
@@ -154,20 +155,26 @@ class V2AutonomousTransitionExecutor:
         if not self._prepare_workspace(registration, branch, exact_base):
             return _intervention("DEVELOPMENT_WORKSPACE_PREPARE_FAILED")
 
-        approved_findings = ()
+        approved_findings: tuple[ImplementerFinding, ...] = ()
         expected_change_identity: str | None = None
         if decision.transition is V2Transition.REPAIR:
             expected_change_identity = clean_workspace_change_identity(exact_base, branch)
-            external = self.external_review_state.get(work.work_identity)
-            if (
-                external is None
-                or external.status != "REQUEST_CHANGES"
-                or external.target_head_sha != exact_base
-                or external.change_identity != expected_change_identity
-                or not external.approved_findings
-            ):
-                return _intervention("EXTERNAL_REPAIR_FINDINGS_UNAVAILABLE")
-            approved_findings = external.approved_findings
+            if work.ci_state is EvidenceState.FAIL:
+                ci_findings = self._ci_repair_findings(registration, work)
+                if not ci_findings:
+                    return _intervention("CI_REPAIR_FINDINGS_UNAVAILABLE")
+                approved_findings = ci_findings
+            else:
+                external = self.external_review_state.get(work.work_identity)
+                if (
+                    external is None
+                    or external.status != "REQUEST_CHANGES"
+                    or external.target_head_sha != exact_base
+                    or external.change_identity != expected_change_identity
+                    or not external.approved_findings
+                ):
+                    return _intervention("EXTERNAL_REPAIR_FINDINGS_UNAVAILABLE")
+                approved_findings = external.approved_findings
 
         generation = _generation(decision.schedule_key)
         packet = DevelopmentTaskPacket(
@@ -434,6 +441,58 @@ class V2AutonomousTransitionExecutor:
         )
         return _progressed("EXTERNAL_PASS_CONFIRMED")
 
+
+    def _ci_repair_findings(
+        self,
+        registration: ProductDevelopmentRegistration,
+        work: V2WorkObservation,
+    ) -> tuple[ImplementerFinding, ...]:
+        if work.ci_identity is None:
+            return ()
+        pr_number = _pr_number(work.active_lineage_identity)
+        if pr_number is None:
+            return ()
+        changed = self._run(
+            (
+                "gh",
+                "pr",
+                "diff",
+                str(pr_number),
+                "--repo",
+                registration.repository_identity,
+                "--name-only",
+            ),
+            registration.workspace_canonical_path,
+        )
+        if not changed.succeeded:
+            return ()
+        paths = tuple(
+            line.strip()
+            for line in changed.output.splitlines()
+            if line.strip() and _path_in_scope(line.strip(), self.scope_paths)
+        )
+        if not paths:
+            return ()
+        path = paths[0]
+        identity = "ci-finding:" + hashlib.sha256(
+            f"{work.work_identity}|{work.exact_head_sha}|{work.ci_identity}".encode()
+        ).hexdigest()
+        return (
+            ImplementerFinding(
+                finding_identity=identity,
+                severity="BLOCKING",
+                path=path,
+                location=f"CI:{work.ci_identity}",
+                problem="required exact-head CIが失敗した",
+                basis="Production CI policy",
+                evidence=work.ci_identity,
+                impact="External Review / Integration Gateへ進めない",
+                suggested_fix=(
+                    "current exact HEADのCI failureを調査し、同一lineageで修正して"
+                    "required CIをPASSさせる"
+                ),
+            ),
+        )
 
     def _prepare_workspace(
         self,
@@ -1181,6 +1240,7 @@ def _integration_evidence_valid(work: V2WorkObservation) -> bool:
     return (
         work.exact_head_sha is not None
         and work.verification_state is EvidenceState.PASS
+        and work.ci_state is EvidenceState.PASS
         and work.review_state is EvidenceState.PASS
         and (
             not work.human_verification_required
