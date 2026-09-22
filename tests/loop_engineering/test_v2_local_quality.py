@@ -5,6 +5,7 @@ from pathlib import Path
 from loop_engineering.v2_implementer import (
     DevelopmentTaskPacket,
     ImplementerFinding,
+    ImplementerTransition,
     ImplementerResult,
     ImplementerStatus,
     WorkspaceEffectReport,
@@ -239,7 +240,7 @@ def repaired_effect() -> ImplementerResult:
             request_identity="worker:1",
             packet_identity="repair:1",
             work_identity=target().work_identity,
-            transition=None,
+            transition=ImplementerTransition.REPAIR,
             input_target_identity=target().exact_head_sha,
             result_target_identity="c" * 40,
             change_identity="sha256:" + "d" * 64,

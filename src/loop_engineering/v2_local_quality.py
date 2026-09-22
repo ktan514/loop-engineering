@@ -338,6 +338,16 @@ class LocalQualityResult:
     approved_findings: tuple[ImplementerFinding, ...] = ()
 
 
+class LocalQualityStorePort(Protocol):
+    def get(self, work_identity: str) -> LocalQualityState | None: ...
+
+    def save(self, state: LocalQualityState) -> None: ...
+
+
+class LocalVerificationPort(Protocol):
+    def verify(self, context: LocalQualityContext) -> LocalVerificationResult: ...
+
+
 class LocalReviewerPort(Protocol):
     def review(self, context: LocalQualityContext) -> LocalReviewExecutionResult: ...
 
@@ -698,8 +708,8 @@ class LocalQualityCoordinator:
 
     def __init__(
         self,
-        store: PostgreSQLLocalQualityStore,
-        verifier: LocalVerificationRunner,
+        store: LocalQualityStorePort,
+        verifier: LocalVerificationPort,
         reviewer: LocalReviewerPort,
         implementer: V2ImplementerPort,
         *,
