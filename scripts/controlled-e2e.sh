@@ -396,14 +396,24 @@ OPEN_WORK_COUNT="$(
   gh issue list --repo "$FULL" --state open --limit 1000 --json body \
     --jq '[.[] | select(.body | contains("<!-- loop-engineering-work:"))] | length'
 )"
-OPEN_PR_COUNT="$(gh pr list --repo "$FULL" --state open --json number --jq 'length')"
+ACTIVE_OPEN_PR_COUNT="$(
+  gh pr list --repo "$FULL" --state open --json headRefName \
+    --jq '[.[] | select(.headRefName != "historical/hold")] | length'
+)"
+HOLD_DRAFT_COUNT="$(
+  gh pr list --repo "$FULL" --state open --head "$HOLD_BRANCH" \
+    --json isDraft --jq '[.[] | select(.isDraft == true)] | length'
+)"
 MERGED_PR_COUNT="$(gh pr list --repo "$FULL" --state merged --json number --jq 'length')"
 MAIN_HEAD="$(gh api "repos/$FULL/commits/main" --jq .sha)"
 
 [[ "$GOAL_COUNT" == "1" ]] || die "Goal Issueが一意ではありません: $GOAL_COUNT"
 [[ "$WORK_COUNT" -ge 1 ]] || die "Work Issueがありません"
 [[ "$OPEN_WORK_COUNT" == "0" ]] || die "未完Work Issueがあります: $OPEN_WORK_COUNT"
-[[ "$OPEN_PR_COUNT" == "0" ]] || die "open PRが残っています: $OPEN_PR_COUNT"
+[[ "$ACTIVE_OPEN_PR_COUNT" == "0" ]] || die "current Workのopen PRが残っています"
+if [[ "${LOOP_E2E_CREATE_HOLD_PR:-1}" == "1" ]]; then
+  [[ "$HOLD_DRAFT_COUNT" == "1" ]] || die "historical HOLD PRがdraftのまま保持されていません"
+fi
 [[ "$MERGED_PR_COUNT" -ge 1 ]] || die "merge済みPRがありません"
 [[ "$MAIN_HEAD" =~ ^[0-9a-f]{40}$ ]] || die "main HEADを確認できません"
 
@@ -421,4 +431,4 @@ echo "project_number=$PROJECT_NUMBER"
 echo "main_head=$MAIN_HEAD"
 echo "goal_issues=$GOAL_COUNT"
 echo "work_issues=$WORK_COUNT"
-echo "merged_prs=$MERGED_PR_COUNT"
+echo "merged_prs=$MERGED_PR_COUNT"\necho "historical_hold_draft_prs=$HOLD_DRAFT_COUNT"
