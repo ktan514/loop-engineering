@@ -131,6 +131,7 @@ class LocalLlmCoderImplementerAdapter:
         self,
         runner: Any,
         config: LocalLlmCoderConfig,
+        workspace_path: Path,
         environment: Mapping[str, str],
         *,
         timeout_seconds: int = 1800,
@@ -139,6 +140,7 @@ class LocalLlmCoderImplementerAdapter:
             raise ValueError("LOCAL_LLM_CODER_TIMEOUT_INVALID")
         self._runner = runner
         self._config = config
+        self._workspace = workspace_path.resolve(strict=False)
         self._environment = _sanitized_environment(environment)
         self._timeout_seconds = timeout_seconds
         self._root = config.root.resolve(strict=False)
@@ -154,7 +156,10 @@ class LocalLlmCoderImplementerAdapter:
             return _blocked(local_validation)
 
         workspace = packet.workspace_canonical_path.resolve(strict=False)
-        if workspace != self._config.active_production_path:
+        if (
+            workspace != self._workspace
+            or workspace != self._config.active_production_path
+        ):
             return _blocked("LOCAL_WORKSPACE_IDENTITY_MISMATCH")
         if (
             not self._root.is_dir()
@@ -329,6 +334,7 @@ def build_implementer_backend(
         return LocalLlmCoderImplementerAdapter(
             runner,
             settings.local_llm_coder,
+            settings.workspace_path,
             environment,
             timeout_seconds=timeout_seconds,
         )
@@ -343,6 +349,13 @@ def _validate_local_packet(packet: DevelopmentTaskPacket) -> str | None:
             return "LOCAL_REPAIR_FINDINGS_REQUIRED"
     elif packet.approved_findings:
         return "LOCAL_APPROVED_FINDINGS_UNEXPECTED"
+
+    if packet.transition is ImplementerTransition.DESIGN:
+        if any(
+            not _path_in_scope(target, packet.scope_paths)
+            for target in packet.canonical_design_targets
+        ):
+            return "LOCAL_DESIGN_SCOPE_INVALID"
 
     for finding in packet.approved_findings:
         if finding.severity not in {"BLOCKING", "NON_BLOCKING"}:
@@ -385,7 +398,7 @@ def _request_payload(
         "expected_change_identity": packet.expected_change_identity,
         "active_lineage_identity": packet.active_lineage_identity,
         "authority_refs": list(packet.authority_refs),
-        "scope_paths": list(packet.scope_paths),
+        "scope_paths": list(_worker_scope(packet)),
         "canonical_refs": list(packet.canonical_design_identities),
         "acceptance_checks": list(packet.acceptance_checks),
         "non_goals": list(packet.non_goals),
@@ -500,7 +513,7 @@ def _read_worker_result(
     if len(set(changed_paths)) != len(changed_paths):
         raise ValueError("changed path duplicate")
     if any(
-        not _safe_relative_path(item) or not _path_in_scope(item, packet.scope_paths)
+        not _safe_relative_path(item) or not _path_in_scope(item, _worker_scope(packet))
         for item in changed_paths
     ):
         raise ValueError("changed path invalid")
@@ -601,6 +614,12 @@ def _safe_relative_path(value: str) -> bool:
         return False
     path = PurePosixPath(value)
     return not path.is_absolute() and ".." not in path.parts and value not in {".", "./"}
+
+
+def _worker_scope(packet: DevelopmentTaskPacket) -> tuple[str, ...]:
+    if packet.transition is ImplementerTransition.DESIGN:
+        return packet.canonical_design_targets
+    return packet.scope_paths
 
 
 def _path_in_scope(path: str, scopes: tuple[str, ...]) -> bool:

@@ -94,6 +94,11 @@ class FakeRunner:
 
 
 def worker_result(request: Mapping[str, Any]) -> dict[str, Any]:
+    scopes = request["scope_paths"]
+    assert isinstance(scopes, list)
+    first_scope = scopes[0]
+    assert isinstance(first_scope, str)
+    changed_path = first_scope if "." in Path(first_scope).name else first_scope + "/app.py"
     return {
         "schema_version": 1,
         "request_identity": request["request_identity"],
@@ -111,7 +116,7 @@ def worker_result(request: Mapping[str, Any]) -> dict[str, Any]:
             "verification_finalized": True,
         },
         "findings": [],
-        "changed_paths": ["src/app.py"],
+        "changed_paths": [changed_path],
         "verification_evidence": [
             {"command": "test", "status": "PASS", "summary": "ok"}
         ],
@@ -193,6 +198,7 @@ def test_local_backend_design_and_implement(
     result = LocalLlmCoderImplementerAdapter(
         runner,
         config,
+        workspace,
         environment(),
     ).execute(task)
 
@@ -205,6 +211,12 @@ def test_local_backend_design_and_implement(
     assert runner.request["transition"] == transition.value
     assert runner.request["effect_requirement"] == "MUST_CHANGE"
     assert runner.request["model_profile"] == "local-main"
+    expected_scope = (
+        ["docs/design.md"]
+        if transition is ImplementerTransition.DESIGN
+        else ["src", "docs"]
+    )
+    assert runner.request["scope_paths"] == expected_scope
 
 
 def test_local_backend_repair_binds_change_identity_and_findings(tmp_path: Path) -> None:
@@ -227,7 +239,12 @@ def test_local_backend_repair_binds_change_identity_and_findings(tmp_path: Path)
     )
     runner = FakeRunner(task.exact_base_sha)
 
-    result = LocalLlmCoderImplementerAdapter(runner, config, environment()).execute(task)
+    result = LocalLlmCoderImplementerAdapter(
+        runner,
+        config,
+        workspace,
+        environment(),
+    ).execute(task)
 
     assert result.status is ImplementerStatus.SUCCESS
     assert runner.request is not None
@@ -246,6 +263,27 @@ def test_local_backend_repair_binds_change_identity_and_findings(tmp_path: Path)
             "suggested_fix": "修正する",
         }
     ]
+
+
+def test_local_backend_rejects_configured_workspace_mismatch_before_worker(
+    tmp_path: Path,
+) -> None:
+    _root, workspace, config = local_layout(tmp_path)
+    configured = tmp_path / "configured"
+    configured.mkdir()
+    task = packet(workspace, ImplementerTransition.IMPLEMENT)
+    runner = FakeRunner(task.exact_base_sha)
+
+    result = LocalLlmCoderImplementerAdapter(
+        runner,
+        config,
+        configured.resolve(),
+        environment(),
+    ).execute(task)
+
+    assert result.status is ImplementerStatus.BLOCKED
+    assert result.detail == "LOCAL_WORKSPACE_IDENTITY_MISMATCH"
+    assert runner.worker_calls == 0
 
 
 def test_local_backend_rejects_workspace_mismatch_before_worker(tmp_path: Path) -> None:
