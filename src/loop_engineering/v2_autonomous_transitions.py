@@ -16,6 +16,7 @@ from .v2_autonomous_runner import TransitionExecutionResult, TransitionExecution
 from .v2_development_lineage import (
     GitHubDevelopmentLineageEffects,
     LineageIdentity,
+    LineageResult,
     LineageStatus,
     MaterializedProposal,
     TrustedProposalMaterializer,
@@ -638,7 +639,7 @@ class V2AutonomousTransitionExecutor:
         branch: str,
         generation: int,
         materialized: MaterializedProposal,
-    ):
+    ) -> LineageResult | TransitionExecutionResult:
         published = self.lineage.publish(
             LineageIdentity(
                 registration.repository_identity,
