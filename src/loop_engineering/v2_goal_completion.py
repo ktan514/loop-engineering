@@ -71,7 +71,7 @@ class GitHubGoalCompletion:
                     "GOAL_WORK_PROJECT_NOT_COMPLETED",
                 )
 
-        goal_issue = bootstrap.projection.goal_issue
+        goal_issue = bootstrap.projection.goal_issue_number
         state = self._issue_state(registration.repository_identity, goal_issue)
         if state is None:
             return GoalCompletionResult(

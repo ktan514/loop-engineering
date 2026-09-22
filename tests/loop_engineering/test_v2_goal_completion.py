@@ -1,4 +1,5 @@
 import json
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -42,7 +43,7 @@ class FakeRunner:
         self.project_states = {"goal-item": "Backlog", "work-item": "Done"}
         self.mutations: list[tuple[str, ...]] = []
 
-    def run(self, args) -> str:
+    def run(self, args: Sequence[str]) -> str:
         values = tuple(args)
         if values[:3] == ("gh", "issue", "view"):
             issue = int(values[3])
