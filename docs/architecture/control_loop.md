@@ -483,3 +483,30 @@ mutation後checkpoint前crashでも、effect identityをreadbackして二重送�
 - Issue comment自然文をmachine current-state Authorityにしない
 - Product固有Issue/Project identityをCoreへ埋め込まない
 - controlled Goal-to-completion E2E未PASSでPlatform完成としない
+
+## 15. Local Quality Loopと段階External Review
+
+Issue #98の採用後、IMPLEMENT / REPAIR後の品質経路は単一のREVIEWだけではなく、ローカル品質ループと外部段階レビューを区別する。
+
+```text
+IMPLEMENT / REPAIR
+→ READBACK
+→ VERIFY_LOCAL
+→ LOCAL_REVIEW
+   ├─ REQUEST_CHANGES → same lineage REPAIR
+   ├─ INCOMPLETE → LOCAL_REVIEWを継続
+   └─ PASS → LOCAL_PASS
+→ EXTERNAL_REVIEW_L1
+→ ...
+→ EXTERNAL_REVIEW_LN
+→ HUMAN_VERIFY?
+→ INTEGRATE
+```
+
+`LOCAL_PASS`はrequired local verification、fresh Self Review、blocking finding 0、Completion Contract充足が同じexact targetへ成立した場合だけ生成する。
+
+外部review findingの修正でHEADが変わった場合、旧HEADのLocal/External Review PASSは全てstaleとし、新HEADはLocal Reviewを取り直した後、External Review Level 1から再開する。
+
+Worker process/sessionの終了はstate completionではない。Completion Contractを満たさない終了はunfinished stageとしてPostgreSQLから再開する。
+
+詳細契約は `docs/architecture/local_llm_coder_integration.md` を正本とする。
