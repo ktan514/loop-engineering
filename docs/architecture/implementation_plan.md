@@ -279,8 +279,8 @@ Exit:
 
 ## 14. #98による追加設計Gate
 
-Work: #98  
-Parent: #81  
+Work: #98
+Parent: #81
 Related: #85 / #87 / #88
 
 #85 / #87で完成したImplementer / exact-head review / repair契約は維持する。一方、Local LLM backend、自動Self Review、Completion Contract、段階External Review、model profileは#82〜#87の当初製造範囲では一意に実装されていない。
