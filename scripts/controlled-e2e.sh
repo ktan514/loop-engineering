@@ -182,15 +182,20 @@ if [[ -z "$PROJECT_NUMBER" ]]; then
 fi
 [[ "$PROJECT_NUMBER" =~ ^[1-9][0-9]*$ ]] || die "Project番号を取得できません"
 
-FIELDS="$(gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json)"
-printf '%s' "$FIELDS" | grep -q '"name":"Status"' || die "ProjectにStatus fieldがありません"
-printf '%s' "$FIELDS" | grep -q '"name":"Acceptance criteria digest"' || {
+STATUS_OPTIONS="$(
+  gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json     --jq '.fields[] | select(.name == "Status") | .options[].name'
+)"
+ACCEPTANCE_FIELD="$(
+  gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json     --jq '.fields[] | select(.name == "Acceptance criteria digest") | .name'
+)"
+[[ -n "$STATUS_OPTIONS" ]] || die "ProjectにStatus fieldがありません"
+[[ "$ACCEPTANCE_FIELD" == "Acceptance criteria digest" ]] || {
   die "ProjectにAcceptance criteria digest fieldがありません"
 }
-printf '%s' "$FIELDS" | grep -q "\"name\":\"$INITIAL_STATUS\"" || {
+printf '%s\n' "$STATUS_OPTIONS" | grep -Fxq "$INITIAL_STATUS" || {
   die "Statusに初期option '$INITIAL_STATUS' がありません"
 }
-printf '%s' "$FIELDS" | grep -q "\"name\":\"$DONE_STATUS\"" || {
+printf '%s\n' "$STATUS_OPTIONS" | grep -Fxq "$DONE_STATUS" || {
   die "Statusに完了option '$DONE_STATUS' がありません"
 }
 
