@@ -1,6 +1,4 @@
 import json
-import subprocess
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,10 +9,8 @@ from loop_engineering.v2_implementer import (
     WorkspaceEffectReport,
 )
 from loop_engineering.v2_local_quality import (
-    LocalFindingValidation,
     LocalQualityContext,
     LocalQualityCoordinator,
-    LocalQualityResult,
     LocalQualityStage,
     LocalQualityState,
     LocalQualityStatus,
@@ -64,7 +60,7 @@ class FakeDatabase:
             "approved_findings": json.loads(next(v for v in values if v.startswith("["))),
             "diagnostics": json.loads([v for v in values if v.startswith("[")][-1]),
         }
-        # Tests that need restart behavior use MemoryStore below; this fake only proves SQL is emitted.
+        # Restart behavior is covered by MemoryStore; this fake only proves SQL emission.
         return True
 
     def query_json_rows(self, select_sql: str) -> list[dict[str, object]] | None:
