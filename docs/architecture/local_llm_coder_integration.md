@@ -626,3 +626,12 @@ Issueは変更を実装するRepositoryへ作成する。
 将来`local-llm-coder`固有の独立ロードマップが大きくなり専用Projectを設ける場合も、Project #9を統合Authorityとして維持し、専用ProjectはBackend内部計画に限定する。統合Workの状態を二つのProjectで別々のAuthorityとして管理しない。
 
 Repository間の結合はsource copy、subdirectory化、submodule化ではなく、versioned Adapter / CLI / structured request-result contractで行う。
+
+
+## DESIGN段階のverification契約
+
+DESIGN段階では最終Product受入条件を設計文脈として渡すが、Product実装testのPASSをDESIGN完了条件にはしない。DESIGN Workerはcanonical design targetだけを変更し、Hostがtarget fileの実変更・非空内容・content-bound identityをreadbackして設計完了を確定する。
+
+IMPLEMENT / REPAIRでは最終Product受入条件に対応するverification evidenceを必須とし、Host側Local Verificationでもtrusted commandを再実行する。
+
+これにより `DESIGN → IMPLEMENT → VERIFY_LOCAL` の順序を維持し、設計前に実装を進めることも、設計段階で未実装testを偽PASSすることも許可しない。

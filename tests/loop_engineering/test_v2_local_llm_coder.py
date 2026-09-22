@@ -551,3 +551,56 @@ def test_local_config_falls_back_to_implementer_model(tmp_path: Path) -> None:
 
     assert loaded.local_llm_coder is not None
     assert loaded.local_llm_coder.model_profile == "compatibility-profile"
+
+
+def test_design_pass_can_defer_product_verification(tmp_path: Path) -> None:
+    packet = _packet(
+        tmp_path,
+        transition=ImplementerTransition.DESIGN,
+        canonical_design_identities=(),
+        canonical_design_targets=("docs/design.md",),
+        acceptance_checks=("product tests pass",),
+    )
+    request_identity = _request_identity(packet, "IMPLEMENTER", "local-main")
+    result_path = tmp_path / "result.json"
+    result_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "request_identity": request_identity,
+                "task_packet_identity": packet.packet_identity,
+                "role": "IMPLEMENTER",
+                "input_target_identity": packet.exact_base_sha,
+                "result_target_identity": packet.exact_base_sha,
+                "change_identity": "sha256:" + "1" * 64,
+                "status": "PASS",
+                "failure_kind": None,
+                "completion": {
+                    "scope_checked": True,
+                    "target_identity_checked": True,
+                    "work_finalized": True,
+                    "verification_finalized": True,
+                },
+                "findings": [],
+                "changed_paths": ["docs/design.md"],
+                "verification_evidence": [],
+                "diagnostics": [],
+                "session_id": "session-design",
+                "artifacts": {
+                    "runtime_directory": None,
+                    "event_log": None,
+                    "stderr_log": None,
+                    "agent_artifact_refs": [],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    parsed = _read_worker_result(
+        result_path,
+        packet=packet,
+        request_identity=request_identity,
+    )
+
+    assert parsed.status == "PASS"

@@ -435,11 +435,38 @@ def _request_identity(
 
 
 def _task_text(packet: DevelopmentTaskPacket) -> str:
-    acceptance = "\n".join(f"- {item}" for item in packet.acceptance_checks)
+    acceptance = "\n".join(f"- {item}" for item in packet.acceptance_checks) or "- なし"
+    design_targets = (
+        "\n".join(f"- {item}" for item in packet.canonical_design_targets)
+        or "- なし"
+    )
+    design_identities = (
+        "\n".join(f"- {item}" for item in packet.canonical_design_identities)
+        or "- 未確定"
+    )
+    transition_instruction = {
+        ImplementerTransition.DESIGN: (
+            "最終受入条件を満たすための設計をcanonical design targetへ記録する。"
+            "この段階ではProduct実装codeを変更しない。"
+        ),
+        ImplementerTransition.IMPLEMENT: (
+            "canonical design targetを読み、確定済み設計に従って実装する。"
+            "最終受入条件のverificationを完了する。"
+        ),
+        ImplementerTransition.REPAIR: (
+            "承認済みfindingだけを同一lineageで修正し、"
+            "最終受入条件のverificationを完了する。"
+        ),
+    }[packet.transition]
     return (
         f"Loop Engineering V2の{packet.transition.value}を1回実行する。\n"
         f"Work: {packet.work_identity}\n"
-        "受入条件:\n"
+        f"{transition_instruction}\n"
+        "canonical design target:\n"
+        f"{design_targets}\n"
+        "canonical design identity:\n"
+        f"{design_identities}\n"
+        "最終Product受入条件:\n"
         f"{acceptance}"
     )
 
@@ -521,7 +548,11 @@ def _read_worker_result(
         raise ValueError("MUST_CHANGE effect missing")
 
     verification = _verification_tuple(value.get("verification_evidence"))
-    if status == "PASS" and packet.acceptance_checks:
+    if (
+        status == "PASS"
+        and packet.transition is not ImplementerTransition.DESIGN
+        and packet.acceptance_checks
+    ):
         if not verification or any(item.status != "PASS" for item in verification):
             raise ValueError("PASS verification invalid")
 
