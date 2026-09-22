@@ -214,3 +214,30 @@ model / endpoint変更だけでLoop EngineeringのWork/Review状態機械を変�
 API key等の秘密値は既存どおり環境変数参照だけを設定へ保存し、実値をprofile、TaskPacket、Checkpoint、Worker resultへ含めない。
 
 詳細は `docs/architecture/local_llm_coder_integration.md` を正本とする。
+
+## 11. Verification command設定
+
+自律RunnerのLocal Qualityで実行するProduction固有test/lintはHostのtrusted configへ宣言する。CoreへPython/Node等の特定toolchainを固定しない。
+
+```ini
+[verification.command.1]
+identity = tests
+argv_json = ["python", "-m", "pytest"]
+working_directory = .
+timeout_seconds = 1200
+required = true
+
+[verification.command.2]
+identity = lint
+argv_json = ["ruff", "check", "src", "tests"]
+working_directory = .
+timeout_seconds = 300
+required = true
+```
+
+`argv_json`は文字列JSON配列として読み、shell interpolationを行わず`subprocess`へargvとして渡す。working directoryはWorkspace内のrelative pathだけを許可する。
+
+明示設定がない既存構成では互換用に`git diff --check HEAD`だけを既定verificationとして使用する。Production完成Gateとして十分なtestを要求する場合は、Productに適したrequired commandをHost設定へ明示する。
+
+secret値をargvへ埋め込まない。credentialが必要な検証は別のtrusted capability policyを設計してから追加する。
+

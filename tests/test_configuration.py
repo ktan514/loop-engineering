@@ -158,6 +158,56 @@ def test_invalid_review_level_pass_count_fails_closed(tmp_path: Path) -> None:
         LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
 
 
+def test_verification_commands_default_to_safe_diff_check(tmp_path: Path) -> None:
+    config = tmp_path / "loop-engineering.ini"
+    _write_config(config, str(tmp_path / "product"))
+
+    settings = LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+
+    assert len(settings.verification_commands) == 1
+    command = settings.verification_commands[0]
+    assert command.identity == "git-diff-check"
+    assert command.argv == ("git", "diff", "--check", "HEAD")
+
+
+def test_verification_commands_load_as_argv_without_shell(tmp_path: Path) -> None:
+    config = tmp_path / "loop-engineering.ini"
+    _write_config(config, str(tmp_path / "product"))
+    with config.open("a", encoding="utf-8") as stream:
+        stream.write(
+            "\n[verification.command.1]\n"
+            "identity = tests\n"
+            'argv_json = ["python", "-m", "pytest", "-q"]\n'
+            "working_directory = .\n"
+            "timeout_seconds = 900\n"
+            "required = true\n"
+        )
+
+    settings = LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+
+    assert len(settings.verification_commands) == 1
+    command = settings.verification_commands[0]
+    assert command.identity == "tests"
+    assert command.argv == ("python", "-m", "pytest", "-q")
+    assert command.timeout_seconds == 900
+    assert command.required
+
+
+def test_verification_command_path_traversal_fails_closed(tmp_path: Path) -> None:
+    config = tmp_path / "loop-engineering.ini"
+    _write_config(config, str(tmp_path / "product"))
+    with config.open("a", encoding="utf-8") as stream:
+        stream.write(
+            "\n[verification.command.1]\n"
+            "identity = tests\n"
+            'argv_json = ["python", "-m", "pytest"]\n'
+            "working_directory = ../outside\n"
+        )
+
+    with pytest.raises(ValueError, match="working_directory"):
+        LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+
+
 def test_default_reviewer_api_key_environment_is_openai_api_key(tmp_path: Path) -> None:
     config = tmp_path / "loop-engineering.ini"
     workspace = tmp_path / "product"

@@ -193,14 +193,15 @@ def run_autonomous(
         external_review=external_review,
         external_review_state=external_store,
         review_levels=settings.review_levels,
-        verification_commands=(
+        verification_commands=tuple(
             VerificationCommandDescriptor(
-                "git-diff-check",
-                ("git", "diff", "--check", "HEAD"),
-                ".",
-                120,
-                True,
-            ),
+                item.identity,
+                item.argv,
+                item.working_directory,
+                item.timeout_seconds,
+                item.required,
+            )
+            for item in settings.verification_commands
         ),
         scope_paths=(".",),
     )
