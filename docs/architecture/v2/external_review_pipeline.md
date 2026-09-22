@@ -64,9 +64,15 @@ ExternalReviewTarget
 - acceptance_digest
 - scope_paths[]
 - local_pass_identity
+- acceptance_checks[]
+- canonical_context[(reference, content)]
+- verification_evidence[]
+- non_goals[]
 ```
 
 HEADまたはchange identityが変わった場合、旧External Review evidenceはcurrent targetへ流用しない。
+
+外部API reviewerはProduct Workspaceへ直接tool accessを持つとは限らないため、Hostはtrusted canonical sourceから解決した設計本文、受入条件、ローカル検証証拠をbounded review contextとして渡す。identity/digestだけを渡して「設計を確認した」と扱わない。
 
 ## 4. fresh pass
 
@@ -81,6 +87,9 @@ ReviewRequestKeyへ最低限次を含める。
 - provider/model policy identity
 - canonical design identities
 - acceptance digest
+- canonical context digest
+- normalized acceptance checks
+- verification evidence identities/summaries
 
 したがって同一passの重複provider callは抑止する一方、pass 1とpass 2は別callとして実行される。
 

@@ -95,6 +95,10 @@ def target(
         acceptance_digest="acceptance:1",
         scope_paths=("src", "tests"),
         local_pass_identity=local_pass,
+        acceptance_checks=("tests pass", "design matches",),
+        canonical_context=(("docs/design.md", "canonical design body"),),
+        verification_evidence=("pytest: PASS",),
+        non_goals=("scope外は変更しない",),
     )
 
 
