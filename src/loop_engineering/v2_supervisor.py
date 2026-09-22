@@ -72,7 +72,11 @@ class V2WorkObservation:
 
     @property
     def terminal(self) -> bool:
-        return self.lifecycle == "COMPLETED" and self.issue_state == "CLOSED"
+        return (
+            self.lifecycle == "COMPLETED"
+            and self.issue_state == "CLOSED"
+            and self.project_status == "Done"
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -205,11 +205,17 @@ class V2AutonomousTransitionExecutor:
             approved_findings=approved_findings,
         )
         implemented = self.implementer.execute(packet)
-        if implemented.status is ImplementerStatus.INCOMPLETE:
-            return _waiting(implemented.detail)
-        if implemented.status is ImplementerStatus.BLOCKED:
-            return _intervention(implemented.detail)
         if implemented.status is not ImplementerStatus.SUCCESS:
+            if not self._restore_workspace_to_target(
+                registration.workspace_canonical_path,
+                branch,
+                exact_base,
+            ):
+                return _intervention("DEVELOPMENT_WORKSPACE_RECOVERY_FAILED")
+            if implemented.status is ImplementerStatus.INCOMPLETE:
+                return _waiting(implemented.detail)
+            if implemented.status is ImplementerStatus.BLOCKED:
+                return _intervention(implemented.detail)
             return _failed(implemented.detail)
 
         materialized: MaterializedProposal | None = None
@@ -303,9 +309,15 @@ class V2AutonomousTransitionExecutor:
             verification_commands=self.verification_commands,
         )
         result = self.local_quality.run(context)
-        if result.status is LocalQualityStatus.INCOMPLETE:
-            return _waiting(result.detail)
-        if result.status is LocalQualityStatus.BLOCKED:
+        if result.status is not LocalQualityStatus.PASS:
+            if not self._restore_workspace_to_target(
+                registration.workspace_canonical_path,
+                branch,
+                work.exact_head_sha,
+            ):
+                return _intervention("LOCAL_QUALITY_WORKSPACE_RECOVERY_FAILED")
+            if result.status is LocalQualityStatus.INCOMPLETE:
+                return _waiting(result.detail)
             return _intervention(result.detail)
         if result.local_pass_identity is None:
             return _intervention("LOCAL_PASS_IDENTITY_MISSING")
@@ -504,6 +516,32 @@ class V2AutonomousTransitionExecutor:
                     "required CIをPASSさせる"
                 ),
             ),
+        )
+
+    def _restore_workspace_to_target(
+        self,
+        root: Path,
+        branch: str,
+        exact_head: str,
+    ) -> bool:
+        reset = self._run(
+            ("git", "reset", "--hard", exact_head),
+            root,
+            timeout_seconds=180,
+        )
+        if not reset.succeeded:
+            return False
+        cleaned = self._run(
+            ("git", "clean", "-fd", "--", "."),
+            root,
+            timeout_seconds=180,
+        )
+        if not cleaned.succeeded:
+            return False
+        return (
+            self._git_output(root, ("rev-parse", "HEAD")) == exact_head
+            and self._git_output(root, ("branch", "--show-current")) == branch
+            and self._git_output(root, ("status", "--porcelain")) == ""
         )
 
     def _prepare_workspace(
