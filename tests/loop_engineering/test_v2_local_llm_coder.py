@@ -296,7 +296,12 @@ def test_local_backend_rejects_workspace_mismatch_before_worker(tmp_path: Path) 
     )
     runner = FakeRunner(task.exact_base_sha)
 
-    result = LocalLlmCoderImplementerAdapter(runner, config, environment()).execute(task)
+    result = LocalLlmCoderImplementerAdapter(
+        runner,
+        config,
+        workspace,
+        environment(),
+    ).execute(task)
 
     assert result.status is ImplementerStatus.BLOCKED
     assert result.detail == "LOCAL_WORKSPACE_IDENTITY_MISMATCH"
@@ -312,7 +317,12 @@ def test_local_backend_rejects_malformed_or_mismatched_result(
     task = packet(workspace, ImplementerTransition.IMPLEMENT)
     runner = FakeRunner(task.exact_base_sha, result_mode=mode)
 
-    result = LocalLlmCoderImplementerAdapter(runner, config, environment()).execute(task)
+    result = LocalLlmCoderImplementerAdapter(
+        runner,
+        config,
+        workspace,
+        environment(),
+    ).execute(task)
 
     assert result.status is ImplementerStatus.FAILED
     assert result.detail == "LOCAL_WORKER_RESULT_MALFORMED"
@@ -326,7 +336,12 @@ def test_local_backend_timeout_is_incomplete(tmp_path: Path) -> None:
         raise_error=subprocess.TimeoutExpired("worker", 1),
     )
 
-    result = LocalLlmCoderImplementerAdapter(runner, config, environment()).execute(task)
+    result = LocalLlmCoderImplementerAdapter(
+        runner,
+        config,
+        workspace,
+        environment(),
+    ).execute(task)
 
     assert result.status is ImplementerStatus.INCOMPLETE
     assert result.detail == "LOCAL_WORKER_TIMEOUT"
@@ -338,7 +353,12 @@ def test_local_backend_provider_unavailable_is_failed(tmp_path: Path) -> None:
     task = packet(workspace, ImplementerTransition.IMPLEMENT)
     runner = FakeRunner(task.exact_base_sha, raise_error=OSError("unavailable"))
 
-    result = LocalLlmCoderImplementerAdapter(runner, config, environment()).execute(task)
+    result = LocalLlmCoderImplementerAdapter(
+        runner,
+        config,
+        workspace,
+        environment(),
+    ).execute(task)
 
     assert result.status is ImplementerStatus.FAILED
     assert result.detail == "LOCAL_WORKER_UNAVAILABLE"
@@ -349,7 +369,12 @@ def test_process_exit_zero_without_result_is_not_success(tmp_path: Path) -> None
     task = packet(workspace, ImplementerTransition.IMPLEMENT)
     runner = FakeRunner(task.exact_base_sha, result_mode="missing")
 
-    result = LocalLlmCoderImplementerAdapter(runner, config, environment()).execute(task)
+    result = LocalLlmCoderImplementerAdapter(
+        runner,
+        config,
+        workspace,
+        environment(),
+    ).execute(task)
 
     assert result.status is ImplementerStatus.FAILED
     assert result.detail == "LOCAL_WORKER_RESULT_MISSING"
@@ -360,7 +385,12 @@ def test_nonzero_process_cannot_promote_pass_result(tmp_path: Path) -> None:
     task = packet(workspace, ImplementerTransition.IMPLEMENT)
     runner = FakeRunner(task.exact_base_sha, process_returncode=7)
 
-    result = LocalLlmCoderImplementerAdapter(runner, config, environment()).execute(task)
+    result = LocalLlmCoderImplementerAdapter(
+        runner,
+        config,
+        workspace,
+        environment(),
+    ).execute(task)
 
     assert result.status is ImplementerStatus.FAILED
     assert result.detail == "LOCAL_WORKER_PROCESS_RESULT_CONFLICT"
@@ -371,7 +401,12 @@ def test_local_backend_strips_control_plane_secrets(tmp_path: Path) -> None:
     task = packet(workspace, ImplementerTransition.IMPLEMENT)
     runner = FakeRunner(task.exact_base_sha)
 
-    result = LocalLlmCoderImplementerAdapter(runner, config, environment()).execute(task)
+    result = LocalLlmCoderImplementerAdapter(
+        runner,
+        config,
+        workspace,
+        environment(),
+    ).execute(task)
 
     assert result.status is ImplementerStatus.SUCCESS
     assert runner.worker_environment == {
