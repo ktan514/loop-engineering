@@ -30,6 +30,7 @@ cd ~/workspace/loop-engineering
 ```bash
 ./scripts/controlled-e2e.sh prepare
 ./scripts/controlled-e2e.sh once
+./scripts/controlled-e2e.sh restart
 ./scripts/controlled-e2e.sh audit
 ```
 
@@ -57,12 +58,12 @@ export LOOP_E2E_POSTGRES_CONTAINER=<container-name>
 
 ## 再起動試験
 
-`once`は1 iterationでprocessを終了する。同じcommandを繰り返してもPostgreSQL durable stateとGitHub live stateから再開し、Issue / Project item / branch / PRを重複作成しないことを確認する。
+`once`は1 iterationでprocessを終了する。`restart`はこのbounded起動を最大100回、毎回別processとして繰り返し、PostgreSQL durable stateとGitHub live stateからGoal完了へ収束できることを確認する。Issue / Project item / branch / PRの重複作成を許可しない。
 
 `run`はGoal完了までcontinuousに進める。
 
 ## 証拠
 
-成功時の最終出力は`CONTROLLED_E2E_AUDIT=PASS`。Repository、Project番号、main exact HEAD、Goal/Work Issue数、merged PR数も表示する。
+成功時の最終出力は`CONTROLLED_E2E_AUDIT=PASS`。Repository、Project番号、main exact HEAD、Goal/Work Issue数、merged PR数を表示する。さらに`historical/hold`のdraft PRを事前に用意し、current Work lineageへ誤採用・mergeされず残っていることを監査する。
 
 effect送信直前/直後、UNCERTAIN、stale evidence、competing lineage等は#89のfault-injection Gateと組み合わせて最終Completion判定する。
