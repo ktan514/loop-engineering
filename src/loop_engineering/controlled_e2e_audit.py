@@ -7,6 +7,7 @@ import json
 import os
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Protocol
 
 from .config import LoopEngineeringSettings
 from .operational_config import inject_operational_store_environment
@@ -14,12 +15,27 @@ from .postgres_runtime import PostgreSQLCommandAdapter
 from .preflight import SubprocessCommandRunner
 
 
+class E2EAuditCapabilities(Protocol):
+    database: bool
+    migration: bool
+
+
+class E2EAuditDatabase(Protocol):
+    def probe(self) -> E2EAuditCapabilities: ...
+
+    def query_json_rows(
+        self,
+        select_sql: str,
+    ) -> list[dict[str, object]] | None: ...
+
+
 def audit_controlled_e2e(
     *,
     settings: LoopEngineeringSettings,
     environment: Mapping[str, str],
-    database: PostgreSQLCommandAdapter,
+    database: E2EAuditDatabase,
 ) -> dict[str, object]:
+    del environment
     capabilities = database.probe()
     if not capabilities.database or not capabilities.migration:
         raise RuntimeError("E2E_DATABASE_NOT_READY")
