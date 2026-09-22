@@ -126,8 +126,9 @@ LocalWorkerRequest
 - transition
 - repository_identity
 - workspace_canonical_path
+- input_target_identity
 - exact_base_sha
-- exact_target_sha?
+- expected_head_identity?
 - active_lineage_identity
 - authority_refs[]
 - scope_paths[]
@@ -141,7 +142,9 @@ LocalWorkerResult
 - request_identity
 - task_packet_identity
 - role
-- exact_target_identity
+- input_target_identity
+- result_target_identity?
+- change_identity?
 - status
 - completion
 - findings[]
@@ -167,6 +170,18 @@ LocalWorkerResult
 
 process終了コード0だけで`PASS`へ昇格しない。
 
+### 3.1 identityの扱い
+
+Worker roleごとにtarget identityの意味を混同しない。
+
+- Implementer / Fixer入力は変更開始前の`input_target_identity`と`exact_base_sha`へbindする。
+- proposal modeでは変更後HEADがまだ存在しないため、結果は`change_identity`（patch/proposal identity）を返し、`result_target_identity`はHostが変更適用・readback後に確定する。
+- remote-effects modeでWorker自身がcommit等を行う場合だけ、結果に`result_target_identity`を含められる。ただしHostのfresh readbackなしに確定事実へ昇格しない。
+- Self ReviewerはHostがreadback済みのexact `result_target_identity` / `change_identity`へbindする。
+- Local/External Review evidenceはreview対象HEADまたはchange identityが変わればstaleになる。
+
+既存`ChangeProposal.exact_base_sha` / `patch_sha256`と、`ReviewTarget.head_identity` / `change_identity`の区別を維持する。
+
 ## 4. Completion Contract
 
 Workerは自由文を返しただけでは完了にならない。roleごとに必須fieldを満たした構造化結果が必要である。
@@ -175,8 +190,9 @@ Workerは自由文を返しただけでは完了にならない。roleごとに�
 
 - request identity一致
 - TaskPacket identity一致
-- exact target echo一致
+- input target echo一致
 - role一致
+- Reviewerではreview対象のresult target / change identity一致
 - terminal statusが存在
 - 未処理の「次に確認する」actionが残っていない
 - diagnosticsと未検証事項が明示されている
