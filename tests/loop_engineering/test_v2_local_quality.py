@@ -1,5 +1,6 @@
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -96,12 +97,12 @@ class FingerprintRunner:
 
     def run(
         self,
-        command,
+        command: Sequence[str],
         *,
-        cwd=None,
-        environment=None,
-        timeout_seconds=120,
-        capture_output=True,
+        cwd: Path | None = None,
+        environment: Mapping[str, str] | None = None,
+        timeout_seconds: int = 120,
+        capture_output: bool = True,
     ) -> Result:
         del cwd, environment, timeout_seconds, capture_output
         values = tuple(command)
