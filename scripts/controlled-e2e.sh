@@ -164,6 +164,24 @@ EOF
   git -C "$PRODUCTION" push -u origin main
 fi
 
+HOLD_BRANCH="historical/hold"
+HOLD_PR_NUMBER="$(
+  gh pr list --repo "$FULL" --state open --head "$HOLD_BRANCH"     --json number --jq '.[0].number // empty'
+)"
+if [[ -z "$HOLD_PR_NUMBER" && "${LOOP_E2E_CREATE_HOLD_PR:-1}" == "1" ]]; then
+  git -C "$PRODUCTION" fetch origin main
+  git -C "$PRODUCTION" switch main
+  git -C "$PRODUCTION" reset --hard origin/main
+  git -C "$PRODUCTION" switch -C "$HOLD_BRANCH"
+  printf '%s\n' "historical HOLD lineage; must never be adopted by Loop Engineering."     > "$PRODUCTION/HOLD.md"
+  git -C "$PRODUCTION" add HOLD.md
+  git -C "$PRODUCTION" commit -m "chore: historical HOLD lineageを用意する"
+  git -C "$PRODUCTION" push -u origin "$HOLD_BRANCH"
+  gh pr create --repo "$FULL" --base main --head "$HOLD_BRANCH" --draft     --title "HOLD: historical lineage"     --body "Controlled E2E: this PR must remain unrelated to current Work lineage."     >/dev/null
+  git -C "$PRODUCTION" switch main
+  git -C "$PRODUCTION" reset --hard origin/main
+fi
+
 PROJECT_NUMBER="$(
   gh project list --owner "$OWNER" --format json \
     --jq ".projects[] | select(.title == \"$PROJECT_TITLE\") | .number" \
