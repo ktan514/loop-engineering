@@ -2,7 +2,7 @@
 # Loop Engineering V2 controlled real-Production E2E Gate.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "\${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$ROOT"
 
 die() {
@@ -15,22 +15,22 @@ command -v git >/dev/null 2>&1 || die "gitが見つかりません"
 command -v pyenv >/dev/null 2>&1 || die "pyenvが見つかりません"
 command -v pipenv >/dev/null 2>&1 || die "pipenvが見つかりません"
 
-OWNER="\${LOOP_E2E_OWNER:-$(gh api user --jq .login)}"
-NAME="\${LOOP_E2E_NAME:-loop-engineering-controlled-e2e}"
+OWNER="${LOOP_E2E_OWNER:-$(gh api user --jq .login)}"
+NAME="${LOOP_E2E_NAME:-loop-engineering-controlled-e2e}"
 FULL="$OWNER/$NAME"
-PROJECT_TITLE="\${LOOP_E2E_PROJECT_TITLE:-Loop Engineering controlled E2E - $NAME}"
-TEMPLATE_PROJECT_OWNER="\${LOOP_E2E_TEMPLATE_PROJECT_OWNER:-ktan514}"
-TEMPLATE_PROJECT_NUMBER="\${LOOP_E2E_TEMPLATE_PROJECT_NUMBER:-10}"
-LOCAL_ROOT="\${LOOP_E2E_LOCAL_LLM_CODER_ROOT:-$HOME/workspace/ollama/local-llm-coder}"
-PROFILE="\${LOOP_E2E_MODEL_PROFILE:-local-main}"
-INITIAL_STATUS="\${LOOP_E2E_INITIAL_STATUS:-Backlog}"
-DONE_STATUS="\${LOOP_E2E_DONE_STATUS:-Done}"
-CI_WORKFLOW="\${LOOP_E2E_CI_WORKFLOW:-E2E CI}"
-LOW_REVIEW_MODEL="\${LOOP_E2E_LOW_REVIEW_MODEL:-}"
-HIGH_REVIEW_MODEL="\${LOOP_E2E_HIGH_REVIEW_MODEL:-}"
-REVIEW_API_BASE="\${LOOP_E2E_REVIEW_API_BASE:-https://api.openai.com/v1}"
-POSTGRES_DRIVER="\${LOOP_E2E_POSTGRES_DRIVER:-\${LOOP_POSTGRES_DRIVER:-host}}"
-POSTGRES_CONTAINER="\${LOOP_E2E_POSTGRES_CONTAINER:-\${LOOP_POSTGRES_CONTAINER:-}}"
+PROJECT_TITLE="${LOOP_E2E_PROJECT_TITLE:-Loop Engineering controlled E2E - $NAME}"
+TEMPLATE_PROJECT_OWNER="${LOOP_E2E_TEMPLATE_PROJECT_OWNER:-ktan514}"
+TEMPLATE_PROJECT_NUMBER="${LOOP_E2E_TEMPLATE_PROJECT_NUMBER:-10}"
+LOCAL_ROOT="${LOOP_E2E_LOCAL_LLM_CODER_ROOT:-$HOME/workspace/ollama/local-llm-coder}"
+PROFILE="${LOOP_E2E_MODEL_PROFILE:-local-main}"
+INITIAL_STATUS="${LOOP_E2E_INITIAL_STATUS:-Backlog}"
+DONE_STATUS="${LOOP_E2E_DONE_STATUS:-Done}"
+CI_WORKFLOW="${LOOP_E2E_CI_WORKFLOW:-E2E CI}"
+LOW_REVIEW_MODEL="${LOOP_E2E_LOW_REVIEW_MODEL:-}"
+HIGH_REVIEW_MODEL="${LOOP_E2E_HIGH_REVIEW_MODEL:-}"
+REVIEW_API_BASE="${LOOP_E2E_REVIEW_API_BASE:-https://api.openai.com/v1}"
+POSTGRES_DRIVER="${LOOP_E2E_POSTGRES_DRIVER:-${LOOP_POSTGRES_DRIVER:-host}}"
+POSTGRES_CONTAINER="${LOOP_E2E_POSTGRES_CONTAINER:-${LOOP_POSTGRES_CONTAINER:-}}"
 
 [[ "$OWNER" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "LOOP_E2E_OWNERが不正です"
 [[ "$NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "LOOP_E2E_NAMEが不正です"
@@ -38,11 +38,11 @@ POSTGRES_CONTAINER="\${LOOP_E2E_POSTGRES_CONTAINER:-\${LOOP_POSTGRES_CONTAINER:-
 [[ -d "$LOCAL_ROOT" ]] || die "local-llm-coder rootがありません: $LOCAL_ROOT"
 [[ -x "$LOCAL_ROOT/scripts/run-worker.sh" ]] || die "local-llm-coder Workerがありません"
 [[ -f "$LOCAL_ROOT/config/local-profiles.json" ]] || die "local-profiles.jsonがありません"
-[[ -n "\${LOOP_POSTGRES_DSN:-}" ]] || die "LOOP_POSTGRES_DSNを設定してください"
-[[ -n "\${OPENAI_API_KEY:-}" ]] || die "OPENAI_API_KEYを設定してください"
+[[ -n "${LOOP_POSTGRES_DSN:-}" ]] || die "LOOP_POSTGRES_DSNを設定してください"
+[[ -n "${OPENAI_API_KEY:-}" ]] || die "OPENAI_API_KEYを設定してください"
 
 if [[ -z "$LOW_REVIEW_MODEL" || -z "$HIGH_REVIEW_MODEL" ]]; then
-  SOURCE_CONFIG="\${LOOP_E2E_SOURCE_CONFIG:-$ROOT/config/loop-engineering.ini}"
+  SOURCE_CONFIG="${LOOP_E2E_SOURCE_CONFIG:-$ROOT/config/loop-engineering.ini}"
   if [[ -f "$SOURCE_CONFIG" ]]; then
     SOURCE_MODEL="$(
       awk '
@@ -56,8 +56,8 @@ if [[ -z "$LOW_REVIEW_MODEL" || -z "$HIGH_REVIEW_MODEL" ]]; then
         }
       ' "$SOURCE_CONFIG"
     )"
-    LOW_REVIEW_MODEL="\${LOW_REVIEW_MODEL:-$SOURCE_MODEL}"
-    HIGH_REVIEW_MODEL="\${HIGH_REVIEW_MODEL:-$SOURCE_MODEL}"
+    LOW_REVIEW_MODEL="${LOW_REVIEW_MODEL:-$SOURCE_MODEL}"
+    HIGH_REVIEW_MODEL="${HIGH_REVIEW_MODEL:-$SOURCE_MODEL}"
   fi
 fi
 [[ -n "$LOW_REVIEW_MODEL" ]] || die "LOOP_E2E_LOW_REVIEW_MODELを設定してください"
@@ -67,7 +67,7 @@ if [[ "$POSTGRES_DRIVER" == "docker" && -z "$POSTGRES_CONTAINER" ]]; then
   die "docker PostgreSQLではLOOP_E2E_POSTGRES_CONTAINERが必要です"
 fi
 
-RUN_ROOT="\${LOOP_E2E_RUN_ROOT:-$HOME/.local/share/loop-engineering/controlled-e2e/$NAME}"
+RUN_ROOT="${LOOP_E2E_RUN_ROOT:-$HOME/.local/share/loop-engineering/controlled-e2e/$NAME}"
 PRODUCTION="$LOCAL_ROOT/productions/$NAME"
 CONFIG="$RUN_ROOT/loop-engineering.ini"
 GOAL="$RUN_ROOT/goal.md"
@@ -307,7 +307,7 @@ pipenv run python -m loop_engineering \
 
 export LOOP_MISSION_GOAL_PATH="$GOAL"
 
-MODE="\${1:-run}"
+MODE="${1:-run}"
 case "$MODE" in
   prepare)
     echo "CONTROLLED_E2E_PREPARED=PASS"
