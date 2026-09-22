@@ -80,7 +80,7 @@ Loop Engineering CoreはOpenCode、Ollama、特定モデル名、OpenAIのSDK型
 
 ### 2.3 Product Workspaceが所有するもの
 
-Product WorkspaceはProduct code、Product canonical、Product固有設定・試験・実行結果を所有する。
+Product WorkspaceはProduct code、Product canonical、Product固有設定・試験・実行結果を所有する。今回の#98統合開発では`ai-liver-yura`をread-only参照対象とし、変更しない。
 
 Loop Engineeringと`local-llm-coder`はProduct固有の意味Authorityを複製しない。
 
@@ -98,6 +98,19 @@ Loop Engineeringと`local-llm-coder`はProduct固有の意味Authorityを複製�
 - 「相互にRead / Write可能」と「相互Repositoryを常時同時に変更する」は別である。1つのtransitionではtarget Repositoryとscopeを明示する。
 
 したがって境界は「Repository AはRepository Bへ書けない」ではなく、**現在のWork / TaskPacketで選択されたtarget Repositoryだけを安全にRead / Writeする**ことである。
+
+### 2.5 今回の統合開発でのRepository変更範囲
+
+今回の#98および後続の統合実装では、変更対象Repositoryは次の2つである。
+
+- `ktan514/loop-engineering`
+- `ktan514/local-llm-coder`
+
+この2 Repositoryは、現在Work / TaskPacket / branch / PR / exact-head Gateに従う限り、相互にRead / Write可能である。
+
+一方、`ai-liver-yura`は今回のLoop Engineering基盤統合作業の変更対象外とし、設計・code・test・Issue・PR・branchへ変更を入れない。必要な場合は既存Productの実例・互換性確認対象としてread-only参照する。
+
+これは将来のLoop Engineering運用でProduct Workspaceを書き換えられないという意味ではない。完成後に`ai-liver-yura`を正式なActive Productとして選択した実運転では、そのProduct WorkのTaskPacket / scope / Write Gateに従って変更可能である。今回の基盤統合作業と、将来のProduct開発実行を区別する。
 
 ## 3. local-llm-coder Backend契約
 
