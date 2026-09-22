@@ -384,6 +384,47 @@ def test_duplicate_finding_is_classified() -> None:
     assert checked.duplicate_identities == ("finding:1",)
 
 
+def test_repeated_invalid_finding_is_bounded() -> None:
+    invalid = ImplementerFinding(
+        "finding:bad",
+        "BLOCKING",
+        "../outside",
+        "L1",
+        "bug",
+        "basis",
+        "evidence",
+        "impact",
+        "fix",
+    )
+    invalid_review = LocalReviewExecutionResult(
+        LocalReviewStatus.FINDINGS,
+        "review-request:invalid",
+        target().exact_head_sha,
+        target().change_identity,
+        completion(),
+        (invalid,),
+        None,
+        (),
+    )
+    store = MemoryStore()
+    coordinator = LocalQualityCoordinator(
+        store,
+        SequenceVerifier([verification(LocalVerificationStatus.PASS)]),
+        SequenceReviewer([invalid_review, invalid_review, invalid_review]),
+        SequenceImplementer([]),
+        max_no_progress=3,
+    )
+
+    first = coordinator.run(context())
+    second = coordinator.run(context())
+    third = coordinator.run(context())
+
+    assert first.status is LocalQualityStatus.INCOMPLETE
+    assert second.status is LocalQualityStatus.INCOMPLETE
+    assert third.status is LocalQualityStatus.BLOCKED
+    assert third.detail == "LOCAL_FINDING_VALIDATION_NO_PROGRESS"
+
+
 def test_postgresql_store_emits_durable_state_sql() -> None:
     database = FakeDatabase()
     store = PostgreSQLLocalQualityStore(database)
