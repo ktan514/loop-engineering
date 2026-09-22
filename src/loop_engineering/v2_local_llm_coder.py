@@ -625,6 +625,8 @@ def _worker_scope(packet: DevelopmentTaskPacket) -> tuple[str, ...]:
 def _path_in_scope(path: str, scopes: tuple[str, ...]) -> bool:
     for scope in scopes:
         normalized = scope.rstrip("/")
+        if normalized in {"", "."}:
+            return True
         if path == normalized or path.startswith(normalized + "/"):
             return True
     return False

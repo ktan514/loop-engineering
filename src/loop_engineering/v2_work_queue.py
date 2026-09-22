@@ -200,6 +200,7 @@ def _observation(
         priority=definition.priority,
         dependency_states=definition.dependency_states,
         acceptance_digest=definition.acceptance_criteria_digest,
+        selected_transition=record.selected_transition,
         canonical_design_identities=canonical_design_identities,
         active_lineage_identity=record.active_lineage_identity,
         latest_packet_identity=record.latest_task_packet_identity,

@@ -20,6 +20,7 @@ def work(
     canonical_design_identities: tuple[str, ...] = (),
     exact_head_sha: str | None = None,
     verification_state: EvidenceState = EvidenceState.NOT_RUN,
+    ci_state: EvidenceState = EvidenceState.PASS,
     review_state: EvidenceState = EvidenceState.NOT_RUN,
     human_verification_required: bool = False,
     human_verification_state: EvidenceState = EvidenceState.NOT_REQUIRED,
@@ -38,6 +39,7 @@ def work(
         canonical_design_identities=canonical_design_identities,
         exact_head_sha=exact_head_sha,
         verification_state=verification_state,
+        ci_state=ci_state,
         review_state=review_state,
         human_verification_required=human_verification_required,
         human_verification_state=human_verification_state,
@@ -98,6 +100,30 @@ def test_review_request_changes_returns_same_work_to_repair() -> None:
     assert derive_transition(target) is V2Transition.REPAIR
 
 
+def test_local_pass_waits_for_exact_head_ci() -> None:
+    target = work(
+        1,
+        canonical_design_identities=("design:a",),
+        exact_head_sha="a" * 40,
+        verification_state=EvidenceState.PASS,
+        ci_state=EvidenceState.PENDING,
+    )
+
+    assert derive_transition(target) is None
+
+
+def test_exact_head_ci_failure_returns_to_repair() -> None:
+    target = work(
+        1,
+        canonical_design_identities=("design:a",),
+        exact_head_sha="a" * 40,
+        verification_state=EvidenceState.PASS,
+        ci_state=EvidenceState.FAIL,
+    )
+
+    assert derive_transition(target) is V2Transition.REPAIR
+
+
 def test_human_verification_is_required_before_integrate() -> None:
     target = work(
         1,
@@ -136,7 +162,12 @@ def test_unresolved_conflict_requires_intervention_when_nothing_else_is_actionab
 
 
 def test_goal_completion_requires_terminal_work_and_acceptance_evidence() -> None:
-    target = work(1, issue_state="CLOSED", lifecycle="COMPLETED")
+    target = work(
+        1,
+        issue_state="CLOSED",
+        lifecycle="COMPLETED",
+        project_status="Done",
+    )
 
     incomplete = V2Supervisor().decide(
         goal_revision="rev-1",

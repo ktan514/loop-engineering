@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from collections.abc import Mapping
@@ -202,6 +203,32 @@ class ReviewLevelConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class VerificationCommandConfig:
+    """Production固有のtrusted verification command descriptor。"""
+
+    identity: str
+    argv: tuple[str, ...]
+    working_directory: str = "."
+    timeout_seconds: int = 1200
+    required: bool = True
+
+    def __post_init__(self) -> None:
+        if (
+            not self.identity.strip()
+            or not self.argv
+            or any(not item or "\x00" in item for item in self.argv)
+        ):
+            raise ValueError("verification commandが不正です")
+        if (
+            self.working_directory != "."
+            and not _safe_relative_config_path(self.working_directory)
+        ):
+            raise ValueError("verification working_directoryが不正です")
+        if self.timeout_seconds < 1 or self.timeout_seconds > 7200:
+            raise ValueError("verification timeout_secondsは1..7200で指定してください")
+
+
+@dataclass(frozen=True, slots=True)
 class LocalLlmCoderConfig:
     """local-llm-coder Worker Backendの非秘密設定。"""
 
@@ -257,6 +284,7 @@ class LoopEngineeringSettings:
     secrets: SecretReferenceConfig
     local_llm_coder: LocalLlmCoderConfig | None = None
     review_levels: tuple[ReviewLevelConfig, ...] = ()
+    verification_commands: tuple[VerificationCommandConfig, ...] = ()
 
     @classmethod
     def load(
@@ -345,6 +373,7 @@ class LoopEngineeringSettings:
             model_config,
             reviewer_api_key_env,
         )
+        verification_commands = _verification_commands_from_parser(parser)
         secrets = SecretReferenceConfig(
             github_token_env=(
                 credentials.get("github_token_env", "GH_TOKEN").strip() or "GH_TOKEN"
@@ -368,6 +397,7 @@ class LoopEngineeringSettings:
             secrets=secrets,
             local_llm_coder=local_llm_coder,
             review_levels=review_levels,
+            verification_commands=verification_commands,
         )
 
     def runtime_environment(
@@ -532,6 +562,75 @@ def _configured_path(platform_root: Path, environment: Mapping[str, str]) -> Pat
     if raw:
         return Path(raw)
     return platform_root / "config" / "loop-engineering.ini"
+
+
+def _verification_commands_from_parser(
+    parser: ConfigParser,
+) -> tuple[VerificationCommandConfig, ...]:
+    sections: list[tuple[int, SectionProxy]] = []
+    for name in parser.sections():
+        matched = re.fullmatch(r"verification\.command\.(\d+)", name)
+        if matched is None:
+            continue
+        index = int(matched.group(1))
+        if index < 1:
+            raise ValueError("verification command番号は1以上で指定してください")
+        sections.append((index, parser[name]))
+
+    if not sections:
+        return (
+            VerificationCommandConfig(
+                identity="git-diff-check",
+                argv=("git", "diff", "--check", "HEAD"),
+                working_directory=".",
+                timeout_seconds=120,
+                required=True,
+            ),
+        )
+
+    sections.sort(key=lambda item: item[0])
+    result: list[VerificationCommandConfig] = []
+    identities: set[str] = set()
+    for _index, section in sections:
+        identity = _required(section, "identity")
+        if identity in identities:
+            raise ValueError("verification command identityが重複しています")
+        raw_argv = _required(section, "argv_json")
+        try:
+            parsed = json.loads(raw_argv)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"{section.name}.argv_jsonはJSON配列で指定してください") from error
+        if (
+            not isinstance(parsed, list)
+            or not parsed
+            or not all(isinstance(item, str) and item for item in parsed)
+        ):
+            raise ValueError(f"{section.name}.argv_jsonは文字列JSON配列で指定してください")
+        try:
+            required = section.getboolean("required", fallback=True)
+        except ValueError as error:
+            raise ValueError(
+                f"{section.name}.requiredはtrue/falseで指定してください"
+            ) from error
+        result.append(
+            VerificationCommandConfig(
+                identity=identity,
+                argv=tuple(parsed),
+                working_directory=(
+                    section.get("working_directory", ".").strip() or "."
+                ),
+                timeout_seconds=_bounded_int_section(
+                    section,
+                    "timeout_seconds",
+                    default=1200,
+                    minimum=1,
+                    maximum=7200,
+                ),
+                required=required,
+            )
+        )
+        identities.add(identity)
+    return tuple(result)
 
 
 def _review_levels_from_parser(
@@ -716,6 +815,13 @@ def _optional_int_mapping(values: Mapping[str, str], name: str) -> int | None:
     if value < 1:
         raise ValueError(f"{name}は1以上で指定してください")
     return value
+
+
+def _safe_relative_config_path(value: str) -> bool:
+    if not value or value != value.strip() or "\\" in value or "\x00" in value:
+        return False
+    path = Path(value)
+    return not path.is_absolute() and ".." not in path.parts and value not in {"", "./"}
 
 
 def _validate_env_name(name: str, value: str) -> None:

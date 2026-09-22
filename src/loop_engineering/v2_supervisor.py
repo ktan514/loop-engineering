@@ -48,11 +48,14 @@ class V2WorkObservation:
     priority: str | None
     dependency_states: tuple[str, ...]
     acceptance_digest: str | None
+    selected_transition: str | None = None
     canonical_design_identities: tuple[str, ...] = ()
     active_lineage_identity: str | None = None
     exact_head_sha: str | None = None
     verification_state: EvidenceState = EvidenceState.NOT_RUN
     verification_identity: str | None = None
+    ci_state: EvidenceState = EvidenceState.NOT_RUN
+    ci_identity: str | None = None
     review_state: EvidenceState = EvidenceState.NOT_RUN
     review_identity: str | None = None
     human_verification_required: bool = False
@@ -69,7 +72,11 @@ class V2WorkObservation:
 
     @property
     def terminal(self) -> bool:
-        return self.lifecycle == "COMPLETED" and self.issue_state == "CLOSED"
+        return (
+            self.lifecycle == "COMPLETED"
+            and self.issue_state == "CLOSED"
+            and self.project_status == "Done"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,6 +206,8 @@ def derive_transition(work: V2WorkObservation) -> V2Transition | None:
         return None
     if not work.canonical_design_identities:
         return V2Transition.DESIGN
+    if work.selected_transition == V2Transition.DESIGN.value:
+        return V2Transition.IMPLEMENT
     if work.exact_head_sha is None:
         return V2Transition.IMPLEMENT
     if work.verification_state is EvidenceState.FAIL:
@@ -208,6 +217,12 @@ def derive_transition(work: V2WorkObservation) -> V2Transition | None:
     if work.verification_state is EvidenceState.PENDING:
         return None
     if work.verification_state is not EvidenceState.PASS:
+        return V2Transition.REPAIR
+    if work.ci_state is EvidenceState.FAIL:
+        return V2Transition.REPAIR
+    if work.ci_state in {EvidenceState.NOT_RUN, EvidenceState.PENDING}:
+        return None
+    if work.ci_state is not EvidenceState.PASS:
         return V2Transition.REPAIR
     if work.review_state in {EvidenceState.FAIL, EvidenceState.REQUEST_CHANGES}:
         return V2Transition.REPAIR
@@ -241,6 +256,7 @@ def schedule_key(
         "issue_revision": work.issue_revision,
         "issue_state": work.issue_state,
         "lifecycle": work.lifecycle,
+        "selected_transition": work.selected_transition,
         "project_status": work.project_status,
         "priority": work.priority,
         "dependency_states": work.dependency_states,
@@ -249,6 +265,7 @@ def schedule_key(
         "active_lineage_identity": work.active_lineage_identity,
         "exact_head_sha": work.exact_head_sha,
         "verification": (work.verification_state.value, work.verification_identity),
+        "ci": (work.ci_state.value, work.ci_identity),
         "review": (work.review_state.value, work.review_identity),
         "human_verification": (
             work.human_verification_state.value,

@@ -414,8 +414,8 @@ def apply_evidence(work: V2WorkObservation, bundle: EvidenceBundle) -> V2WorkObs
         raise ValueError("EVIDENCE_HEAD_MISMATCH")
     return replace(
         work,
-        verification_state=bundle.ci.state,
-        verification_identity=bundle.ci.identity,
+        ci_state=bundle.ci.state,
+        ci_identity=bundle.ci.identity,
         review_state=bundle.review.state,
         review_identity=bundle.review.identity,
         human_verification_state=bundle.human.state,

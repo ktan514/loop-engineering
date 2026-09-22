@@ -105,7 +105,7 @@ class ExternalReviewTarget:
         if not self.acceptance_digest.strip() or not self.local_pass_identity.strip():
             raise ValueError("EXTERNAL_REVIEW_EVIDENCE_INVALID")
         if not self.scope_paths or any(
-            not _safe_relative_path(path) for path in self.scope_paths
+            not _safe_scope_path(path) for path in self.scope_paths
         ):
             raise ValueError("EXTERNAL_REVIEW_SCOPE_INVALID")
         if not self.acceptance_checks or any(
@@ -1083,6 +1083,12 @@ def _finding_payload(finding: ImplementerFinding) -> dict[str, str]:
         "impact": finding.impact,
         "suggested_fix": finding.suggested_fix,
     }
+
+
+def _safe_scope_path(value: str) -> bool:
+    if value in {".", "./"}:
+        return True
+    return _safe_relative_path(value)
 
 
 def _safe_relative_path(value: str) -> bool:

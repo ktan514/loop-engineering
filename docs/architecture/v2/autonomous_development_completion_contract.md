@@ -20,8 +20,12 @@ BOOTSTRAP
 → SELECT
 → DESIGN
 → IMPLEMENT
-→ VERIFY
-→ REVIEW
+→ VERIFY_LOCAL
+→ LOCAL_REVIEW
+→ LOCAL_PASS
+→ EXACT_HEAD_CI
+→ EXTERNAL_REVIEW(level/pass)
+→ EXTERNAL_PASS
 → HUMAN_VERIFY?
 → REPAIR?
 → INTEGRATE
@@ -178,7 +182,7 @@ CI / review / Human Verification待ちのWorkだけを理由にMission全体をH
 
 ## 7. DESIGN / IMPLEMENT / REPAIR
 
-Codex Implementerへのdispatchは、すべて型付きTaskPacketを介する。
+Implementer Workerへのdispatchは、すべて型付きTaskPacketを介する。標準production Backendは`local-llm-coder`であり、Codex proposal Backendは交換可能Adapterとして維持する。
 
 最低限のTaskPacket:
 
@@ -212,7 +216,9 @@ DevelopmentTaskPacket
 
 CI failure、REQUEST_CHANGES、再現可能なblocking findingは同一Work / 同一active lineageへREPAIRを発行する。別branchや別PRを作って逃げない。
 
-Codexの終了コードは「作業プロセスが終了した」証拠であり、Git変更成功・push成功・PR成功のAuthorityではない。必ずGit / GitHub liveをfresh readbackする。
+Workerの終了コードは「作業プロセスが終了した」証拠であり、実装完了・Git変更成功・push成功・PR成功のAuthorityではない。versioned Completion Contract、Workspace effect、Git / GitHub liveをfresh readbackする。
+
+Local WorkerがWorkspaceを直接変更した場合、HostはHEAD / branch / change identity / scopeを再確認し、dirty変更をtrusted commitへ正規化してから既存lineage effectでpublishする。
 
 ## 8. 開発lineageと外部effect
 
@@ -243,19 +249,43 @@ create系effectでもcommand failure後に同じcreateを即再送しない。lo
 
 1 Work = 1 active implementation lineageを不変条件とする。
 
-## 9. CI / Review / Human Verification
+## 9. Local Quality / CI / External Review / Human Verification
 
-### CI
+### Local Quality
 
-CIはexact HEADへ結び付ける。old-head SUCCESSはcurrent HEADのPASSではない。
+IMPLEMENTまたはREPAIR後は、同一exact targetへ次を自動反復する。
 
-CI failureは通常REPAIRへ戻す。CI pendingは外部待ちであり、Human Interventionではない。
+```text
+VERIFY_LOCAL
+→ fresh LOCAL_REVIEW
+   ├─ BLOCKING finding → same-lineage FIXER
+   │                    → VERIFY_LOCALから再取得
+   └─ PASS → LOCAL_PASS
+```
 
-### Review
+Local ReviewerはImplementerとfresh sessionで分離し、read-onlyとする。targetのHEADまたはchange identityが変われば旧LOCAL_PASSはstaleである。
 
-ReviewerはImplementerと独立した境界を維持する。同一exact HEADへのreview requestは原則1回とし、HEAD変更時だけ新しいrequest identityを作る。
+### Exact-head CI
 
-REQUEST_CHANGESはREPAIRへ戻す。古いHEADのApproveをcurrent HEADへ流用しない。
+LOCAL_PASS後もGitHub CIをexact HEADへ結び付ける。old-head SUCCESSはcurrent HEADのPASSではない。
+
+CI pending / NOT_RUNは外部待ちでありHuman Interventionではない。CI failureは同一active lineageのREPAIRへ戻し、修正後はLocal Qualityから全Gateを取り直す。
+
+### External Review
+
+exact-head CI PASS後に、Production policyで定義されたExternal Review Level 1..Nを順番に実行する。各Levelは`passes_required`を持ち、同一Levelでもfresh reviewを複数回要求できる。
+
+```text
+LOCAL_PASS
+→ exact-head CI PASS
+→ Level 1 / pass 1..N
+→ Level 2..N / pass 1..N
+→ EXTERNAL_PASS
+```
+
+REQUEST_CHANGESはHostでfindingを検証し、承認済みblocking findingだけをsame-lineage REPAIRへ渡す。修正後はLocal Quality、exact-head CI、External Level 1 / pass 1からすべて取り直す。
+
+Reviewerへはidentity/digestだけではなく、trusted canonical context、受入条件、検証証拠をbounded contextとして渡す。Reviewer credentialはImplementer/Workerへ渡さない。
 
 ### Human Verification
 
@@ -267,9 +297,9 @@ Human Verification evidenceもexact HEADへ結び付ける。HEAD変更後は必
 
 INTEGRATION_READYにできるのは、Work policyが要求する次のevidenceがすべてcurrent exact HEADへ成立した場合だけとする。
 
-- automated verification
-- exact-head CI
-- independent review
+- LOCAL_PASS（required deterministic verification + fresh local self review）
+- exact-head CI PASS
+- required External Review Level / fresh passがすべてPASS
 - Human Verification（必要な場合）
 - unresolved blocking conflictなし
 
@@ -351,17 +381,19 @@ DB recovery
 4. dependency-ready Work選択
 5. DESIGN
 6. IMPLEMENT
-7. automated verify
-8. exact-head CI
-9. independent review
-10. 意図的なfailureまたはREQUEST_CHANGESからREPAIR
-11. 再verify / re-review
-12. 必要なHuman Verification
-13. exact-head merge
-14. Work completion
-15. next Work selection
-16. 全Work完了
-17. Goal completion
+7. deterministic VERIFY_LOCAL
+8. fresh LOCAL_REVIEW
+9. LOCAL_PASS
+10. exact-head CI
+11. External Review Level / required fresh pass
+12. 意図的なCI failureまたはREQUEST_CHANGESからsame-lineage REPAIR
+13. 修正後のLocal Quality / CI / External Review全Gate再取得
+14. 必要なHuman Verification
+15. exact-head merge
+16. Work completion
+17. next Work selection
+18. 全Work完了
+19. Goal completion
 
 さらに次を注入する。
 

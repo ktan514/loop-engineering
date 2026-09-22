@@ -197,7 +197,7 @@ class LocalQualityTarget:
             raise ValueError("LOCAL_QUALITY_DESIGN_REQUIRED")
         if not self.acceptance_digest:
             raise ValueError("LOCAL_QUALITY_ACCEPTANCE_REQUIRED")
-        if not self.scope_paths or any(not _safe_relative_path(item) for item in self.scope_paths):
+        if not self.scope_paths or any(not _safe_scope_path(item) for item in self.scope_paths):
             raise ValueError("LOCAL_QUALITY_SCOPE_INVALID")
 
 
@@ -1641,6 +1641,28 @@ def _resolve_working_directory(workspace: Path, relative: str) -> Path | None:
     return resolved if resolved.is_dir() else None
 
 
+def clean_workspace_change_identity(head: str, branch: str) -> str:
+    """変更なしWorkspaceのlocal-llm-coder change identityを返す。"""
+    if _SHA_RE.fullmatch(head) is None or not branch.strip():
+        raise ValueError("CLEAN_WORKSPACE_IDENTITY_INVALID")
+    digest = hashlib.sha256()
+    digest.update(b"local-llm-coder-change-v2\0")
+    digest.update(head.encode("ascii"))
+    digest.update(b"\0branch\0")
+    digest.update(branch.encode("utf-8", errors="surrogateescape"))
+    digest.update(b"\0staged-diff\0")
+    digest.update(b"")
+    digest.update(b"\0unstaged-diff\0")
+    digest.update(b"")
+    return "sha256:" + digest.hexdigest()
+
+
+def _safe_scope_path(value: str) -> bool:
+    if value in {".", "./"}:
+        return True
+    return _safe_relative_path(value)
+
+
 def _safe_relative_path(value: str) -> bool:
     if not value or value != value.strip() or "\\" in value or "\x00" in value:
         return False
@@ -1651,6 +1673,8 @@ def _safe_relative_path(value: str) -> bool:
 def _path_in_scope(path: str, scopes: tuple[str, ...]) -> bool:
     for scope in scopes:
         normalized = scope.rstrip("/")
+        if normalized in {"", "."}:
+            return True
         if path == normalized or path.startswith(normalized + "/"):
             return True
     return False
