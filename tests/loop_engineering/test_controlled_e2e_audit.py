@@ -12,19 +12,11 @@ from loop_engineering.config import (
 from loop_engineering.controlled_e2e_audit import audit_controlled_e2e
 
 
-class Capabilities:
-    database = True
-    migration = True
-
-
 class FakeDatabase:
     def __init__(self, *, evidence_count: int = 4) -> None:
         self.evidence_count = evidence_count
 
-    def probe(self):
-        return Capabilities()
-
-    def query_json_rows(self, sql: str):
+    def query_json_rows(self, sql: str) -> list[dict[str, object]] | None:
         if "FROM loop_autonomous_runtimes" in sql:
             return [{
                 "runtime_identity": "runtime:1",

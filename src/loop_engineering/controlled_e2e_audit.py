@@ -15,14 +15,7 @@ from .postgres_runtime import PostgreSQLCommandAdapter
 from .preflight import SubprocessCommandRunner
 
 
-class E2EAuditCapabilities(Protocol):
-    database: bool
-    migration: bool
-
-
 class E2EAuditDatabase(Protocol):
-    def probe(self) -> E2EAuditCapabilities: ...
-
     def query_json_rows(
         self,
         select_sql: str,
@@ -36,10 +29,6 @@ def audit_controlled_e2e(
     database: E2EAuditDatabase,
 ) -> dict[str, object]:
     del environment
-    capabilities = database.probe()
-    if not capabilities.database or not capabilities.migration:
-        raise RuntimeError("E2E_DATABASE_NOT_READY")
-
     runtime_rows = database.query_json_rows(
         "SELECT runtime_identity, goal_revision, status, current_work_identity "
         "FROM loop_autonomous_runtimes "
@@ -169,13 +158,17 @@ def main(argv: list[str] | None = None) -> int:
             settings.config_path,
             settings.runtime_environment(os.environ),
         )
+        database = PostgreSQLCommandAdapter(
+            SubprocessCommandRunner(),
+            environment,
+        )
+        capabilities = database.probe()
+        if not capabilities.database or not capabilities.migration:
+            raise RuntimeError("E2E_DATABASE_NOT_READY")
         result = audit_controlled_e2e(
             settings=settings,
             environment=environment,
-            database=PostgreSQLCommandAdapter(
-                SubprocessCommandRunner(),
-                environment,
-            ),
+            database=database,
         )
     except (RuntimeError, ValueError) as error:
         print(
