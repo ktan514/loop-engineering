@@ -39,6 +39,7 @@ class ImplementerTransition(str, Enum):
 
 class ImplementerStatus(str, Enum):
     SUCCESS = "SUCCESS"
+    INCOMPLETE = "INCOMPLETE"
     BLOCKED = "BLOCKED"
     FAILED = "FAILED"
 
@@ -67,6 +68,19 @@ class ImplementerCommandRunner(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class ImplementerFinding:
+    finding_identity: str
+    severity: str
+    path: str
+    location: str
+    problem: str
+    basis: str
+    evidence: str
+    impact: str
+    suggested_fix: str
+
+
+@dataclass(frozen=True, slots=True)
 class DevelopmentTaskPacket:
     packet_identity: str
     work_identity: str
@@ -85,6 +99,8 @@ class DevelopmentTaskPacket:
     authority_refs: tuple[str, ...] = ()
     non_goals: tuple[str, ...] = ()
     safety_constraints: tuple[str, ...] = ()
+    expected_change_identity: str | None = None
+    approved_findings: tuple[ImplementerFinding, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,10 +117,38 @@ class ChangeProposal:
 
 
 @dataclass(frozen=True, slots=True)
+class VerificationEvidence:
+    command: str
+    status: str
+    summary: str
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceEffectReport:
+    request_identity: str
+    packet_identity: str
+    work_identity: str
+    transition: ImplementerTransition
+    input_target_identity: str
+    result_target_identity: str
+    change_identity: str
+    changed_paths: tuple[str, ...]
+    verification_evidence: tuple[VerificationEvidence, ...]
+    diagnostics: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ImplementerResult:
     status: ImplementerStatus
     detail: str
     proposal: ChangeProposal | None = None
+    workspace_effect: WorkspaceEffectReport | None = None
+    failure_kind: str | None = None
+    diagnostics: tuple[str, ...] = ()
+
+
+class V2ImplementerPort(Protocol):
+    def execute(self, packet: DevelopmentTaskPacket) -> ImplementerResult: ...
 
 
 class CodexProposalImplementer:
@@ -129,7 +173,7 @@ class CodexProposalImplementer:
         self._timeout_seconds = timeout_seconds
 
     def execute(self, packet: DevelopmentTaskPacket) -> ImplementerResult:
-        validation = _validate_packet(packet)
+        validation = validate_development_task_packet(packet)
         if validation is not None:
             return ImplementerResult(ImplementerStatus.BLOCKED, validation)
 
@@ -326,7 +370,7 @@ class CodexProposalImplementer:
         return result.output.strip() if result.succeeded else None
 
 
-def _validate_packet(packet: DevelopmentTaskPacket) -> str | None:
+def validate_development_task_packet(packet: DevelopmentTaskPacket) -> str | None:
     if (
         not packet.packet_identity
         or not packet.work_identity
