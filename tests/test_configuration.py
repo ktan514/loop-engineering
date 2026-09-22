@@ -94,6 +94,70 @@ def test_runtime_environment_maps_secret_values_without_putting_them_in_config(
     assert values["LOOP_REVIEWER_MODEL"] == "gpt-5.6-terra"
 
 
+
+
+
+def test_reviewer_single_config_normalizes_to_level_one(tmp_path: Path) -> None:
+    config = tmp_path / "loop-engineering.ini"
+    _write_config(config, str(tmp_path / "product"))
+
+    settings = LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+
+    assert len(settings.review_levels) == 1
+    level = settings.review_levels[0]
+    assert level.level == 1
+    assert level.provider == "openai"
+    assert level.model == "gpt-5.6-terra"
+    assert level.credential_env == "MY_REVIEWER_KEY"
+    assert level.passes_required == 1
+
+
+def test_multiple_review_levels_and_fresh_pass_count_load_from_config(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "loop-engineering.ini"
+    _write_config(config, str(tmp_path / "product"))
+    with config.open("a", encoding="utf-8") as stream:
+        stream.write(
+            "\n[review.level.1]\n"
+            "provider = openai\n"
+            "model = low-reviewer\n"
+            "credential_env = LOW_REVIEW_KEY\n"
+            "required = true\n"
+            "passes_required = 2\n"
+            "escalation_policy = NEXT_LEVEL\n"
+            "\n[review.level.2]\n"
+            "provider = openai\n"
+            "model = high-reviewer\n"
+            "credential_env = HIGH_REVIEW_KEY\n"
+            "required = true\n"
+            "passes_required = 2\n"
+            "escalation_policy = HUMAN\n"
+        )
+
+    settings = LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+
+    assert [(item.level, item.model, item.passes_required) for item in settings.review_levels] == [
+        (1, "low-reviewer", 2),
+        (2, "high-reviewer", 2),
+    ]
+    assert settings.review_levels[0].credential_env == "LOW_REVIEW_KEY"
+    assert settings.review_levels[1].credential_env == "HIGH_REVIEW_KEY"
+
+
+def test_invalid_review_level_pass_count_fails_closed(tmp_path: Path) -> None:
+    config = tmp_path / "loop-engineering.ini"
+    _write_config(config, str(tmp_path / "product"))
+    with config.open("a", encoding="utf-8") as stream:
+        stream.write(
+            "\n[review.level.1]\n"
+            "passes_required = 0\n"
+        )
+
+    with pytest.raises(ValueError, match="passes_required"):
+        LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+
+
 def test_default_reviewer_api_key_environment_is_openai_api_key(tmp_path: Path) -> None:
     config = tmp_path / "loop-engineering.ini"
     workspace = tmp_path / "product"
