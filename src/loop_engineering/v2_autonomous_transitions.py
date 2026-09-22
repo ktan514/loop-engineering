@@ -242,17 +242,20 @@ class V2AutonomousTransitionExecutor:
         if isinstance(published, TransitionExecutionResult):
             return published
 
+        pull_request = published.pull_request
+        if pull_request is None:
+            return _intervention("PUBLISHED_PR_IDENTITY_MISSING")
         self._advance_work(
             work,
             lifecycle="RUNNING",
             selected_transition=decision.transition.value,
-            active_lineage_identity=f"pr:{published.pull_request.number}",
+            active_lineage_identity=f"pr:{pull_request.number}",
             next_action=(
                 "IMPLEMENT_SAME_LINEAGE"
                 if decision.transition is V2Transition.DESIGN
                 else "VERIFY_LOCAL"
             ),
-            evidence=(f"head:{published.pull_request.head_sha}",),
+            evidence=(f"head:{pull_request.head_sha}",),
             schedule_key=decision.schedule_key,
         )
         return _progressed(published.detail)
@@ -336,13 +339,16 @@ class V2AutonomousTransitionExecutor:
             )
             if isinstance(published, TransitionExecutionResult):
                 return published
+            pull_request = published.pull_request
+            if pull_request is None:
+                return _intervention("PUBLISHED_PR_IDENTITY_MISSING")
             self._advance_work(
                 work,
                 lifecycle="RUNNING",
                 selected_transition=V2Transition.REPAIR.value,
-                active_lineage_identity=f"pr:{published.pull_request.number}",
+                active_lineage_identity=f"pr:{pull_request.number}",
                 next_action="VERIFY_LOCAL",
-                evidence=(f"head:{published.pull_request.head_sha}",),
+                evidence=(f"head:{pull_request.head_sha}",),
                 schedule_key=decision.schedule_key,
             )
             return _progressed("LOCAL_REPAIR_PUBLISHED")

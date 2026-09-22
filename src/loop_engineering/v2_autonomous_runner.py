@@ -252,10 +252,6 @@ class ExternalReviewStateReader(Protocol):
     def get(self, work_identity: str) -> ExternalReviewState | None: ...
 
 
-class ExactHeadCIPort(Protocol):
-    def read(self, target: EvidenceTarget, workflow_name: str): ...
-
-
 class EvidenceEnricher:
     """durable Local/External Gateをcurrent PR headへbindしてSupervisorへ投影する。"""
 
