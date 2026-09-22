@@ -166,7 +166,7 @@ GitHub Actionsは初期Adapter。
 ```text
 ImplementerPort
 - inspect_capabilities()
-- execute(TaskPacket) -> ChangeProposal | RemoteEffectReport | BlockedResult
+- execute(TaskPacket) -> ChangeProposal | WorkspaceEffectReport | BlockedResult
 ```
 
 Implementerの本質はTaskPacketに対する設計・変更提案・実装結果生成であり、Git push権限を持つことをCore requirementにしない。
@@ -414,9 +414,11 @@ Adapterは最低限、次のtyped境界を提供する。
 execute(LocalWorkerRequest) -> LocalWorkerResult
 ```
 
-RequestはTaskPacket identity、role、exact target、scope、acceptance、model profileを持つ。Resultはtarget echo、terminal status、Completion Contract、finding、変更path、検証evidence、diagnosticを機械可読形式で返す。
+RequestはTaskPacket identity、role、exact target、scope、acceptance、model profile、effect requirementを持つ。Resultはtarget echo、terminal status、Completion Contract、finding、変更path、検証evidence、diagnosticを機械可読形式で返す。
 
 roleはImplementer / Self Reviewer / Fixerへ対応するが、CoreはOpenCode agent名を直接扱わない。
+
+Local Worker v1はActive Productionを直接変更するWorkspace-effect modeなので、Adapterは成功時に`WorkspaceEffectReport`を返す。これはpost-worker HEADの`result_target_identity`、Workspace全体の`change_identity`、`changed_paths`を保持し、Codex proposal modeの`ChangeProposal`と混同しない。
 
 Local Self Reviewerはread-only capabilityを維持し、External Reviewerと同様にProduct write authorityを持たない。
 
