@@ -90,7 +90,8 @@ class MemoryStore:
 
 
 class FingerprintRunner:
-    def __init__(self) -> None:
+    def __init__(self, workspace: Path) -> None:
+        self.workspace = workspace
         self.head = "a" * 40
         self.branch = "feature/work-1"
         self.verification_calls = 0
@@ -106,7 +107,7 @@ class FingerprintRunner:
     ) -> Result:
         del cwd, environment, timeout_seconds, capture_output
         values = tuple(command)
-        if values[:3] == ("git", "-C", "/tmp/sample"):
+        if values[:3] == ("git", "-C", str(self.workspace)):
             arguments = values[3:]
             if arguments == ("rev-parse", "HEAD"):
                 return Result(output=self.head + "\n")
@@ -201,10 +202,14 @@ def target(
     )
 
 
-def context(item: LocalQualityTarget | None = None) -> LocalQualityContext:
+def context(
+    item: LocalQualityTarget | None = None,
+    *,
+    workspace: Path = Path("/tmp/sample"),
+) -> LocalQualityContext:
     return LocalQualityContext(
         target=item or target(),
-        workspace_canonical_path=Path("/tmp/sample"),
+        workspace_canonical_path=workspace,
         packet_identity="packet:1",
         generation=1,
         goal_revision="goal:1",
@@ -311,19 +316,29 @@ def repaired_effect() -> ImplementerResult:
     )
 
 
-def test_verification_is_bound_to_worker_change_identity() -> None:
-    runner = FingerprintRunner()
+def test_verification_is_bound_to_worker_change_identity(tmp_path: Path) -> None:
+    workspace = tmp_path / "sample"
+    workspace.mkdir()
+    runner = FingerprintRunner(workspace)
     item = target(change=clean_change_identity(runner.head, runner.branch))
-    result = LocalVerificationRunner(runner, {}).verify(context(item))
+    result = LocalVerificationRunner(runner, {}).verify(
+        context(item, workspace=workspace)
+    )
 
     assert result.status is LocalVerificationStatus.PASS
     assert runner.verification_calls == 1
 
 
-def test_verification_rejects_same_head_with_different_change_identity() -> None:
-    runner = FingerprintRunner()
+def test_verification_rejects_same_head_with_different_change_identity(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "sample"
+    workspace.mkdir()
+    runner = FingerprintRunner(workspace)
     item = target(change="sha256:" + "f" * 64)
-    result = LocalVerificationRunner(runner, {}).verify(context(item))
+    result = LocalVerificationRunner(runner, {}).verify(
+        context(item, workspace=workspace)
+    )
 
     assert result.status is LocalVerificationStatus.INCOMPLETE
     assert result.diagnostics == ("LOCAL_VERIFICATION_TARGET_READBACK_FAILED",)
