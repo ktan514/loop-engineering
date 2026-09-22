@@ -46,9 +46,9 @@ class V2WorkObservation:
     lifecycle: str
     project_status: str | None
     priority: str | None
-    done_project_status: str = "Done"
     dependency_states: tuple[str, ...]
     acceptance_digest: str | None
+    done_project_status: str = "Done"
     selected_transition: str | None = None
     canonical_design_identities: tuple[str, ...] = ()
     active_lineage_identity: str | None = None
