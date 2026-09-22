@@ -1,7 +1,6 @@
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
-
 from loop_engineering.config import ReviewLevelConfig
 from loop_engineering.v2_external_review import (
     ExternalReviewCoordinator,
@@ -285,11 +284,11 @@ class ProviderRunner:
 
     def run(
         self,
-        command,
+        command: Sequence[str],
         *,
-        environment=None,
-        timeout_seconds=120,
-        capture_output=True,
+        environment: Mapping[str, str] | None = None,
+        timeout_seconds: int = 120,
+        capture_output: bool = True,
     ) -> CommandResult:
         del environment, timeout_seconds, capture_output
         values = tuple(command)
@@ -311,8 +310,8 @@ class FakeTransport:
     def post_json(
         self,
         url: str,
-        headers,
-        payload,
+        headers: Mapping[str, str],
+        payload: Mapping[str, object],
         timeout_seconds: int,
     ) -> object:
         del url, timeout_seconds

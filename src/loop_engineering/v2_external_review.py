@@ -16,7 +16,7 @@ from typing import Protocol
 
 from .config import ReviewLevelConfig
 from .v2_implementer import ImplementerFinding
-from .v2_local_quality import LocalFindingValidation, validate_local_findings
+from .v2_local_quality import validate_local_findings
 
 _SHA_RE = re.compile(r"[0-9a-f]{40}")
 _CHANGE_RE = re.compile(r"sha256:[0-9a-f]{64}")
