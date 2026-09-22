@@ -23,6 +23,8 @@ from loop_engineering.v2_implementer import (
 )
 from loop_engineering.v2_local_llm_coder import (
     LocalLlmCoderImplementerAdapter,
+    _read_worker_result,
+    _request_identity,
     build_implementer_backend,
 )
 
@@ -554,24 +556,22 @@ def test_local_config_falls_back_to_implementer_model(tmp_path: Path) -> None:
 
 
 def test_design_pass_can_defer_product_verification(tmp_path: Path) -> None:
-    packet = _packet(
-        tmp_path,
-        transition=ImplementerTransition.DESIGN,
+    target_packet = replace(
+        packet(tmp_path, ImplementerTransition.DESIGN),
         canonical_design_identities=(),
-        canonical_design_targets=("docs/design.md",),
         acceptance_checks=("product tests pass",),
     )
-    request_identity = _request_identity(packet, "IMPLEMENTER", "local-main")
+    request_identity = _request_identity(target_packet, "IMPLEMENTER", "local-main")
     result_path = tmp_path / "result.json"
     result_path.write_text(
         json.dumps(
             {
                 "schema_version": 1,
                 "request_identity": request_identity,
-                "task_packet_identity": packet.packet_identity,
+                "task_packet_identity": target_packet.packet_identity,
                 "role": "IMPLEMENTER",
-                "input_target_identity": packet.exact_base_sha,
-                "result_target_identity": packet.exact_base_sha,
+                "input_target_identity": target_packet.exact_base_sha,
+                "result_target_identity": target_packet.exact_base_sha,
                 "change_identity": "sha256:" + "1" * 64,
                 "status": "PASS",
                 "failure_kind": None,
@@ -599,7 +599,7 @@ def test_design_pass_can_defer_product_verification(tmp_path: Path) -> None:
 
     parsed = _read_worker_result(
         result_path,
-        packet=packet,
+        packet=target_packet,
         request_identity=request_identity,
     )
 
