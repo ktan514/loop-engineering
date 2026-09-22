@@ -409,8 +409,13 @@ class V2AutonomousTransitionExecutor:
             local_pass_identity=local.local_pass_identity,
             acceptance_checks=planned.acceptance_criteria,
             canonical_context=canonical_context,
-            verification_evidence=(
-                local.verification_identity or local.local_pass_identity,
+            verification_evidence=tuple(
+                item
+                for item in (
+                    local.verification_identity or local.local_pass_identity,
+                    work.ci_identity,
+                )
+                if item is not None
             ),
             non_goals=(),
         )

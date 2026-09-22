@@ -16,7 +16,11 @@ from .v2_autonomous_runtime import (
     PostgreSQLAutonomousRuntimeStore,
     runtime_identity,
 )
-from .v2_evidence import EvidenceTarget, GitHubExactHeadCIAdapter
+from .v2_evidence import (
+    EvidenceTarget,
+    GitHubExactHeadCIAdapter,
+    GitHubHumanVerificationAdapter,
+)
 from .v2_external_review import ExternalReviewState
 from .v2_goal_planning import (
     BootstrapResult,
@@ -260,10 +264,12 @@ class EvidenceEnricher:
         local_quality: LocalQualityStateReader,
         external_review: ExternalReviewStateReader,
         ci: GitHubExactHeadCIAdapter,
+        human: GitHubHumanVerificationAdapter,
     ) -> None:
         self._local_quality = local_quality
         self._external_review = external_review
         self._ci = ci
+        self._human = human
 
     def enrich(
         self,
@@ -318,6 +324,10 @@ class EvidenceEnricher:
             acceptance_digest=work.acceptance_digest or "",
         )
         ci = self._ci.read(ci_target, registration.ci_workflow_name)
+        human = self._human.read(
+            ci_target,
+            planned.human_verification_required,
+        )
 
         review_state = EvidenceState.NOT_RUN
         review_identity: str | None = None
@@ -352,6 +362,8 @@ class EvidenceEnricher:
             ci_identity=ci.identity,
             review_state=review_state,
             review_identity=review_identity,
+            human_verification_state=human.state,
+            human_verification_identity=human.identity,
             unresolved_conflict=unresolved,
         )
 

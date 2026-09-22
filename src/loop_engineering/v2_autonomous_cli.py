@@ -26,7 +26,7 @@ from .v2_development_lineage import (
     GitHubDevelopmentLineageEffects,
     TrustedProposalMaterializer,
 )
-from .v2_evidence import GitHubExactHeadCIAdapter
+from .v2_evidence import GitHubExactHeadCIAdapter, GitHubHumanVerificationAdapter
 from .v2_execution_state import V2ExecutionStateStore
 from .v2_external_review import (
     ExternalReviewCoordinator,
@@ -160,6 +160,7 @@ def run_autonomous(
         local_store,
         external_store,
         GitHubExactHeadCIAdapter(runner, environment),
+        GitHubHumanVerificationAdapter(runner, environment),
     )
 
     implementer = build_implementer_backend(settings, runner, environment)
