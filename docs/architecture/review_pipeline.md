@@ -215,28 +215,43 @@ model名をCore state machineへハードコードしない。
 - stale targetへPASSしない
 - same ReviewRequestKeyを不必要に二重provider callしない
 
-## 17. Local Review GateとReview Level
+## 17. Local Review Gateと段階APIレビュー
 
-Issue #98ではcanonical external reviewの前にLocal Review Gateを追加する。
+Issue #98以降、canonical external reviewの前にLocal Review Gateを置く。
+
+現在の標準完成policy:
 
 ```text
-VERIFY_LOCAL
+IMPLEMENT / REPAIR
+→ VERIFY_LOCAL
 → LOCAL_REVIEW
 → LOCAL_PASS
-→ EXTERNAL_REVIEW_L1
-→ EXTERNAL_REVIEW_L2
-→ ...
-→ EXTERNAL_REVIEW_LN
+→ LOW_REVIEW_1
+→ LOW_FINAL_REVIEW
+→ HIGH_REVIEW_1
+→ HIGH_FINAL_REVIEW
+→ EXTERNAL_PASS
 ```
 
 Local Reviewは実装Workerとはfresh sessionで分離し、Completion Contractを満たす構造化結果だけをPASS候補とする。
 
-External Reviewの各LevelはReviewerPortの別policy instanceであり、provider/modelは交換可能とする。Coreは特定model名を知らない。
+低レベルAPIと高レベルAPIは別Review Levelとして扱い、各Levelでfreshな2回連続PASSを要求する。1回目のPASSとfinal reviewは同じexact targetへbindするが、ReviewRequestKeyは`pass_index`を含むため別provider callである。
 
-External `REQUEST_CHANGES`を修正してexact targetが変わった場合、旧HEADの全Review Level evidenceを無効化する。新HEADはfresh `LOCAL_PASS`後にLevel 1から再取得する。
+どのAPI reviewでfindingが出ても、valid findingをsame lineage REPAIRへ戻す。修正でtarget identityが変わった場合、旧targetのLocal/Low/High PASSを全てstaleにし、新targetでは次を最初から通す。
 
-`ESCALATE`は次Level、alternate provider、またはHumanへ進める。`NOT_RUN`をPASSへ読み替えない。
+```text
+REPAIR
+→ VERIFY_LOCAL
+→ fresh LOCAL_REVIEW
+→ LOCAL_PASS
+→ LOW_REVIEW_1
+→ LOW_FINAL_REVIEW
+→ HIGH_REVIEW_1
+→ HIGH_FINAL_REVIEW
+```
 
-同一exact target / 同一Level / 同一canonical generationへの重複provider callはReviewRequestKeyで抑止する。
+`ESCALATE`はpolicyでHumanまたは明示された別providerへ移す。`NOT_RUN`をPASSへ読み替えない。
+
+同一exact target / 同一Level / 同一pass_index / 同一canonical generationへの重複provider callはReviewRequestKeyで抑止する。
 
 詳細は `docs/architecture/local_llm_coder_integration.md` を正本とする。
