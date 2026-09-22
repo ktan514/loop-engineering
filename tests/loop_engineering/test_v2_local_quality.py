@@ -1,4 +1,6 @@
+import hashlib
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +23,7 @@ from loop_engineering.v2_local_quality import (
     LocalReviewExecutionResult,
     LocalReviewStatus,
     LocalVerificationResult,
+    LocalVerificationRunner,
     LocalVerificationStatus,
     PostgreSQLLocalQualityStore,
     VerificationCommandDescriptor,
@@ -86,6 +89,65 @@ class MemoryStore:
         self.saved.append(state)
 
 
+class FingerprintRunner:
+    def __init__(self, workspace: Path) -> None:
+        self.workspace = workspace
+        self.head = "a" * 40
+        self.branch = "feature/work-1"
+        self.verification_calls = 0
+
+    def run(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path | None = None,
+        environment: Mapping[str, str] | None = None,
+        timeout_seconds: int = 120,
+        capture_output: bool = True,
+    ) -> Result:
+        del cwd, environment, timeout_seconds, capture_output
+        values = tuple(command)
+        if values[:3] == ("git", "-C", str(self.workspace)):
+            arguments = values[3:]
+            if arguments == ("rev-parse", "HEAD"):
+                return Result(output=self.head + "\n")
+            if arguments == ("rev-parse", "--abbrev-ref", "HEAD"):
+                return Result(output=self.branch + "\n")
+            if arguments in {
+                ("diff", "--cached", "--name-only", "-z", "HEAD", "--"),
+                ("diff", "--name-only", "-z", "--"),
+                ("ls-files", "--others", "--exclude-standard", "-z"),
+                (
+                    "diff",
+                    "--cached",
+                    "--binary",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    "HEAD",
+                    "--",
+                ),
+                ("diff", "--binary", "--no-ext-diff", "--no-textconv", "--"),
+            }:
+                return Result(output="")
+        if values == ("python", "-m", "pytest"):
+            self.verification_calls += 1
+            return Result(output="passed")
+        raise AssertionError(values)
+
+
+def clean_change_identity(head: str, branch: str) -> str:
+    digest = hashlib.sha256()
+    digest.update(b"local-llm-coder-change-v2\0")
+    digest.update(head.encode("ascii"))
+    digest.update(b"\0branch\0")
+    digest.update(branch.encode("utf-8"))
+    digest.update(b"\0staged-diff\0")
+    digest.update(b"")
+    digest.update(b"\0unstaged-diff\0")
+    digest.update(b"")
+    return "sha256:" + digest.hexdigest()
+
+
 class SequenceVerifier:
     def __init__(self, results: list[LocalVerificationResult]) -> None:
         self.results = results
@@ -140,10 +202,14 @@ def target(
     )
 
 
-def context(item: LocalQualityTarget | None = None) -> LocalQualityContext:
+def context(
+    item: LocalQualityTarget | None = None,
+    *,
+    workspace: Path = Path("/tmp/sample"),
+) -> LocalQualityContext:
     return LocalQualityContext(
         target=item or target(),
-        workspace_canonical_path=Path("/tmp/sample"),
+        workspace_canonical_path=workspace,
         packet_identity="packet:1",
         generation=1,
         goal_revision="goal:1",
@@ -248,6 +314,35 @@ def repaired_effect() -> ImplementerResult:
             verification_evidence=(),
         ),
     )
+
+
+def test_verification_is_bound_to_worker_change_identity(tmp_path: Path) -> None:
+    workspace = tmp_path / "sample"
+    workspace.mkdir()
+    runner = FingerprintRunner(workspace)
+    item = target(change=clean_change_identity(runner.head, runner.branch))
+    result = LocalVerificationRunner(runner, {}).verify(
+        context(item, workspace=workspace)
+    )
+
+    assert result.status is LocalVerificationStatus.PASS
+    assert runner.verification_calls == 1
+
+
+def test_verification_rejects_same_head_with_different_change_identity(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "sample"
+    workspace.mkdir()
+    runner = FingerprintRunner(workspace)
+    item = target(change="sha256:" + "f" * 64)
+    result = LocalVerificationRunner(runner, {}).verify(
+        context(item, workspace=workspace)
+    )
+
+    assert result.status is LocalVerificationStatus.INCOMPLETE
+    assert result.diagnostics == ("LOCAL_VERIFICATION_TARGET_READBACK_FAILED",)
+    assert runner.verification_calls == 0
 
 
 def test_first_pass_creates_local_pass() -> None:

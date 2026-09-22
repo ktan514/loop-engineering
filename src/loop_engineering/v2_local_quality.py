@@ -428,8 +428,15 @@ class LocalVerificationRunner:
     ) -> LocalVerificationResult:
         workspace = context.workspace_canonical_path.resolve(strict=False)
         before = self._fingerprint(workspace)
-        if before is None or before[0] != context.target.exact_head_sha:
-            return _verification_incomplete(context, "LOCAL_VERIFICATION_TARGET_READBACK_FAILED")
+        if (
+            before is None
+            or before[0] != context.target.exact_head_sha
+            or before[1] != context.target.change_identity
+        ):
+            return _verification_incomplete(
+                context,
+                "LOCAL_VERIFICATION_TARGET_READBACK_FAILED",
+            )
 
         outcomes: list[VerificationCommandOutcome] = []
         diagnostics: list[str] = []
@@ -507,55 +514,136 @@ class LocalVerificationRunner:
         return self._result(context, status, before[1], tuple(outcomes), tuple(diagnostics))
 
     def _fingerprint(self, workspace: Path) -> tuple[str, str] | None:
-        commands = (
+        simple_commands = (
             ("rev-parse", "HEAD"),
             ("rev-parse", "--abbrev-ref", "HEAD"),
-            ("diff", "--cached", "--binary", "--no-ext-diff", "--no-textconv", "HEAD", "--"),
-            ("diff", "--binary", "--no-ext-diff", "--no-textconv", "--"),
+            ("diff", "--cached", "--name-only", "-z", "HEAD", "--"),
+            ("diff", "--name-only", "-z", "--"),
             ("ls-files", "--others", "--exclude-standard", "-z"),
+            (
+                "diff",
+                "--cached",
+                "--binary",
+                "--no-ext-diff",
+                "--no-textconv",
+                "HEAD",
+                "--",
+            ),
+            ("diff", "--binary", "--no-ext-diff", "--no-textconv", "--"),
         )
         outputs: list[str] = []
-        for arguments in commands:
-            try:
-                result = self._runner.run(
-                    ("git", "-C", str(workspace), *arguments),
-                    cwd=workspace,
-                    environment=self._environment,
-                    timeout_seconds=120,
-                )
-            except (OSError, subprocess.SubprocessError):
+        for arguments in simple_commands:
+            value = self._git_output(workspace, arguments)
+            if value is None:
                 return None
-            if not result.succeeded:
-                return None
-            outputs.append(result.output)
+            outputs.append(value)
+
         head = outputs[0].strip()
-        if _SHA_RE.fullmatch(head) is None:
+        branch = outputs[1].strip()
+        if _SHA_RE.fullmatch(head) is None or not branch:
             return None
+
+        staged_paths = _split_null(outputs[2])
+        unstaged_paths = _split_null(outputs[3])
+        untracked_paths = _split_null(outputs[4])
+        untracked = set(untracked_paths)
+        changed_paths = tuple(
+            sorted(set(staged_paths) | set(unstaged_paths) | untracked)
+        )
+
         digest = hashlib.sha256()
-        digest.update(b"loop-local-verification-target-v1\0")
-        for value in outputs[:4]:
-            digest.update(value.encode("utf-8", errors="surrogateescape"))
-            digest.update(b"\0")
-        untracked = tuple(sorted(item for item in outputs[4].split("\0") if item))
-        for relative in untracked:
+        digest.update(b"local-llm-coder-change-v2\0")
+        digest.update(head.encode("ascii"))
+        digest.update(b"\0branch\0")
+        digest.update(branch.encode("utf-8", errors="surrogateescape"))
+        digest.update(b"\0staged-diff\0")
+        digest.update(outputs[5].encode("utf-8", errors="surrogateescape"))
+        digest.update(b"\0unstaged-diff\0")
+        digest.update(outputs[6].encode("utf-8", errors="surrogateescape"))
+
+        for relative in changed_paths:
             if not _safe_relative_path(relative):
                 return None
-            path = workspace / relative
+            state = self._path_state(workspace, relative, untracked)
+            if state is None:
+                return None
+            digest.update(b"\0path\0")
             digest.update(relative.encode("utf-8", errors="surrogateescape"))
-            digest.update(b"\0")
+            digest.update(b"\0state\0")
+            digest.update(state.encode("ascii"))
+
+        return head, "sha256:" + digest.hexdigest()
+
+    def _path_state(
+        self,
+        workspace: Path,
+        relative: str,
+        untracked: set[str],
+    ) -> str | None:
+        staged = self._git_output(
+            workspace,
+            (
+                "diff",
+                "--cached",
+                "--binary",
+                "--no-ext-diff",
+                "--no-textconv",
+                "HEAD",
+                "--",
+                relative,
+            ),
+        )
+        unstaged = self._git_output(
+            workspace,
+            (
+                "diff",
+                "--binary",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--",
+                relative,
+            ),
+        )
+        if staged is None or unstaged is None:
+            return None
+
+        digest = hashlib.sha256()
+        digest.update(b"local-llm-coder-path-state-v1\0")
+        digest.update(relative.encode("utf-8", errors="surrogateescape"))
+        digest.update(b"\0staged\0")
+        digest.update(staged.encode("utf-8", errors="surrogateescape"))
+        digest.update(b"\0unstaged\0")
+        digest.update(unstaged.encode("utf-8", errors="surrogateescape"))
+
+        if relative in untracked:
+            path = (workspace / relative).absolute()
             try:
-                if path.is_symlink():
-                    digest.update(b"symlink\0")
-                    digest.update(os.readlink(path).encode("utf-8", errors="surrogateescape"))
-                elif path.is_file():
-                    digest.update(b"file\0")
-                    digest.update(path.read_bytes())
-                else:
-                    return None
+                resolved_parent = path.parent.resolve()
             except OSError:
                 return None
-            digest.update(b"\0")
-        return head, "sha256:" + digest.hexdigest()
+            if not resolved_parent.is_relative_to(workspace):
+                return None
+            digest.update(b"\0untracked\0")
+            if not _hash_change_file(path, digest):
+                return None
+
+        return "sha256:" + digest.hexdigest()
+
+    def _git_output(
+        self,
+        workspace: Path,
+        arguments: Sequence[str],
+    ) -> str | None:
+        try:
+            result = self._runner.run(
+                ("git", "-C", str(workspace), *arguments),
+                cwd=workspace,
+                environment=self._environment,
+                timeout_seconds=120,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return result.output if result.succeeded else None
 
     def _result(
         self,
@@ -1513,6 +1601,33 @@ def _state_from_row(row: dict[str, object]) -> LocalQualityState:
         approved_findings=findings,
         diagnostics=diagnostics,
     )
+
+
+def _split_null(raw: str) -> tuple[str, ...]:
+    return tuple(item for item in raw.split("\0") if item)
+
+
+def _hash_change_file(path: Path, digest: object) -> bool:
+    update = getattr(digest, "update", None)
+    if not callable(update):
+        return False
+    try:
+        if path.is_symlink():
+            update(b"symlink\0")
+            update(os.readlink(path).encode("utf-8", errors="surrogateescape"))
+            return True
+        if not path.is_file():
+            return False
+        update(b"file\0")
+        with path.open("rb") as handle:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                update(chunk)
+    except OSError:
+        return False
+    return True
 
 
 def _resolve_working_directory(workspace: Path, relative: str) -> Path | None:

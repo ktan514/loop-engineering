@@ -372,7 +372,7 @@ EXTERNAL_REVIEW_Ln
 
 修正でexact targetが変わったため、旧HEADに対するL1..LnのPASSは全てstaleである。新HEADはLevel 1から取り直す。
 
-target identityが変化せず、provider resultの再取得やinvalid finding除外だけを行った場合は、同じLevelのrequest identityをreconcileできる。
+target identityが変化せず、provider resultの再取得やinvalid finding除外だけを行った場合は、同じLevel / same passのrequest identityをreconcileできる。
 
 ### 6.2 ESCALATE
 
