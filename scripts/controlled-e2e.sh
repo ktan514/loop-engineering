@@ -347,6 +347,30 @@ case "$MODE" in
       --v2-autonomous-once \
       --v2-max-iterations 1
     ;;
+  restart)
+    COMPLETED=0
+    for _attempt in $(seq 1 100); do
+      set +e
+      OUTPUT="$(
+        pipenv run python -m loop_engineering \
+          --config "$CONFIG" \
+          --v2-autonomous-once \
+          --v2-max-iterations 1
+      )"
+      STATUS=$?
+      set -e
+      printf '%s\n' "$OUTPUT"
+      if printf '%s' "$OUTPUT" | grep -q '"status": "GOAL_COMPLETED"'; then
+        COMPLETED=1
+        break
+      fi
+      if [[ "$STATUS" -eq 3 ]]; then
+        die "restart E2EがINTERVENTION_REQUIREDで停止しました"
+      fi
+      sleep 10
+    done
+    [[ "$COMPLETED" == "1" ]] || die "100 process restart内にGoal完了へ収束しませんでした"
+    ;;
   run)
     pipenv run python -m loop_engineering \
       --config "$CONFIG" \
@@ -356,7 +380,7 @@ case "$MODE" in
   audit)
     ;;
   *)
-    die "modeはprepare / once / run / auditのいずれかです"
+    die "modeはprepare / once / restart / run / auditのいずれかです"
     ;;
 esac
 
