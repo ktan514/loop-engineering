@@ -22,6 +22,7 @@ from .v2_evidence import (
     GitHubHumanVerificationAdapter,
 )
 from .v2_external_review import ExternalReviewState
+from .v2_goal_completion import GoalCompletionResult, GoalCompletionStatus
 from .v2_goal_planning import (
     BootstrapResult,
     PlannedWork,
@@ -92,6 +93,24 @@ class TransitionExecutorPort(Protocol):
         planned_work: PlannedWork,
         decision: V2SupervisorDecision,
     ) -> TransitionExecutionResult: ...
+
+
+class GoalCompletionPort(Protocol):
+    def finalize(
+        self,
+        registration: ProductDevelopmentRegistration,
+        bootstrap: BootstrapResult,
+    ) -> GoalCompletionResult: ...
+
+
+class NoopGoalCompletion:
+    def finalize(
+        self,
+        registration: ProductDevelopmentRegistration,
+        bootstrap: BootstrapResult,
+    ) -> GoalCompletionResult:
+        del registration, bootstrap
+        return GoalCompletionResult(GoalCompletionStatus.PASS, "NOOP_GOAL_COMPLETION")
 
 
 class GoalAcceptancePort(Protocol):
@@ -375,8 +394,15 @@ class AllWorkGoalAcceptance:
         bootstrap: BootstrapResult,
         works: tuple[V2WorkObservation, ...],
     ) -> bool:
-        del registration, bootstrap
-        return bool(works) and all(work.lifecycle == "COMPLETED" for work in works)
+        if bootstrap.proposal.completion_conditions != registration.acceptance_criteria:
+            return False
+        return bool(works) and all(
+            work.lifecycle == "COMPLETED"
+            and work.issue_state == "CLOSED"
+            and work.project_status == "Done"
+            and not work.unresolved_conflict
+            for work in works
+        )
 
 
 class V2AutonomousRunner:
@@ -390,6 +416,7 @@ class V2AutonomousRunner:
         supervisor: V2Supervisor,
         transitions: TransitionExecutorPort,
         goal_acceptance: GoalAcceptancePort | None = None,
+        goal_completion: GoalCompletionPort | None = None,
         *,
         no_progress_limit: int = 3,
     ) -> None:
@@ -403,6 +430,7 @@ class V2AutonomousRunner:
         self._supervisor = supervisor
         self._transitions = transitions
         self._goal_acceptance = goal_acceptance or AllWorkGoalAcceptance()
+        self._goal_completion = goal_completion or NoopGoalCompletion()
         self._no_progress_limit = no_progress_limit
 
     def run(
@@ -472,6 +500,8 @@ class V2AutonomousRunner:
             )
 
             terminal = self._terminal_decision(
+                registration,
+                bootstrap,
                 state.runtime_identity,
                 current,
                 decision,
@@ -591,6 +621,8 @@ class V2AutonomousRunner:
 
     def _terminal_decision(
         self,
+        registration: ProductDevelopmentRegistration,
+        bootstrap: BootstrapResult,
         runtime_identity_value: str,
         current_work_identity: str | None,
         decision: V2SupervisorDecision,
@@ -600,6 +632,39 @@ class V2AutonomousRunner:
         iteration: int,
     ) -> AutonomousRunResult | None:
         if decision.disposition is V2SupervisorDisposition.COMPLETE_GOAL:
+            completion = self._goal_completion.finalize(registration, bootstrap)
+            if completion.status is GoalCompletionStatus.WAITING:
+                self._runtime.update_runtime(
+                    runtime_identity_value,
+                    status="WAITING",
+                    current_work_identity=None,
+                    schedule_key=None,
+                    progress_fingerprint=fingerprint,
+                    no_progress_count=no_progress,
+                    detail=completion.detail,
+                )
+                return AutonomousRunResult(
+                    AutonomousRunStatus.WAITING,
+                    completion.detail,
+                    iteration,
+                    runtime_identity_value,
+                )
+            if completion.status is GoalCompletionStatus.BLOCKED:
+                self._runtime.update_runtime(
+                    runtime_identity_value,
+                    status="INTERVENTION_REQUIRED",
+                    current_work_identity=None,
+                    schedule_key=None,
+                    progress_fingerprint=fingerprint,
+                    no_progress_count=no_progress,
+                    detail=completion.detail,
+                )
+                return AutonomousRunResult(
+                    AutonomousRunStatus.INTERVENTION_REQUIRED,
+                    completion.detail,
+                    iteration,
+                    runtime_identity_value,
+                )
             self._runtime.update_runtime(
                 runtime_identity_value,
                 status="COMPLETED",

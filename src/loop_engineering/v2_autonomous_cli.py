@@ -33,6 +33,7 @@ from .v2_external_review import (
     OpenAICompatibleExternalReviewer,
     PostgreSQLExternalReviewStore,
 )
+from .v2_goal_completion import GitHubGoalCompletion
 from .v2_goal_planning import (
     ProductDevelopmentRegistration,
     SingleWorkGoalPlanner,
@@ -219,6 +220,7 @@ def run_autonomous(
         evidence,
         V2Supervisor(),
         transitions,
+        goal_completion=GitHubGoalCompletion(text_runner, bootstrap_state),
     )
 
     while True:
