@@ -1,8 +1,8 @@
 # local-llm-coder統合設計
 
-Owner: Issue #98  
-Parent: Issue #81  
-関連: #85 / #87 / #88  
+Owner: Issue #98
+Parent: Issue #81
+関連: #85 / #87 / #88
 Status: canonical design candidate
 
 ## 1. 目的
