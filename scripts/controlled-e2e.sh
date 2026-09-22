@@ -225,8 +225,14 @@ ACCEPTANCE_FIELD="$(
   gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json     --jq '.fields[] | select(.name == "Acceptance criteria digest") | .name'
 )"
 [[ -n "$STATUS_OPTIONS" ]] || die "ProjectにStatus fieldがありません"
+if [[ "$ACCEPTANCE_FIELD" != "Acceptance criteria digest" ]]; then
+  gh project field-create "$PROJECT_NUMBER"     --owner "$OWNER"     --name "Acceptance criteria digest"     --data-type TEXT     >/dev/null
+  ACCEPTANCE_FIELD="$(
+    gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json       --jq '.fields[] | select(.name == "Acceptance criteria digest") | .name'
+  )"
+fi
 [[ "$ACCEPTANCE_FIELD" == "Acceptance criteria digest" ]] || {
-  die "ProjectにAcceptance criteria digest fieldがありません"
+  die "Acceptance criteria digest fieldを作成できません"
 }
 printf '%s\n' "$STATUS_OPTIONS" | grep -Fxq "$INITIAL_STATUS" || {
   die "Statusに初期option '$INITIAL_STATUS' がありません"
