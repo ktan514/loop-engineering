@@ -46,6 +46,7 @@ class V2WorkObservation:
     lifecycle: str
     project_status: str | None
     priority: str | None
+    done_project_status: str = "Done"
     dependency_states: tuple[str, ...]
     acceptance_digest: str | None
     selected_transition: str | None = None
@@ -75,7 +76,7 @@ class V2WorkObservation:
         return (
             self.lifecycle == "COMPLETED"
             and self.issue_state == "CLOSED"
-            and self.project_status == "Done"
+            and self.project_status == self.done_project_status
         )
 
 

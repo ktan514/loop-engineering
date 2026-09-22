@@ -158,6 +158,24 @@ def test_invalid_review_level_pass_count_fails_closed(tmp_path: Path) -> None:
         LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
 
 
+def test_project_status_names_are_product_configurable(tmp_path: Path) -> None:
+    config = tmp_path / "loop-engineering.ini"
+    _write_config(config, str(tmp_path / "product"))
+    content = config.read_text(encoding="utf-8")
+    content = content.replace(
+        "work_branch_template = loop/work-{issue}\n",
+        "work_branch_template = loop/work-{issue}\n"
+        "initial_project_status = Ready\n"
+        "done_project_status = Completed\n",
+    )
+    config.write_text(content, encoding="utf-8")
+
+    settings = LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+
+    assert settings.engine.initial_project_status == "Ready"
+    assert settings.engine.done_project_status == "Completed"
+
+
 def test_verification_commands_default_to_safe_diff_check(tmp_path: Path) -> None:
     config = tmp_path / "loop-engineering.ini"
     _write_config(config, str(tmp_path / "product"))

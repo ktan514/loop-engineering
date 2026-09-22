@@ -64,6 +64,8 @@ class LoopEngineConfig:
     integration_work: int | None = None
     ci_workflow_name: str = "Deterministic CI"
     work_branch_template: str = "loop/work-{issue}"
+    initial_project_status: str = "Backlog"
+    done_project_status: str = "Done"
     self_improvement: SelfImprovementConfig = field(default_factory=SelfImprovementConfig)
 
     def __post_init__(self) -> None:
@@ -76,6 +78,8 @@ class LoopEngineConfig:
             ("issue_level", self.issue_level),
             ("ci_workflow_name", self.ci_workflow_name),
             ("work_branch_template", self.work_branch_template),
+            ("initial_project_status", self.initial_project_status),
+            ("done_project_status", self.done_project_status),
         )
         for name, value in text_fields:
             if not value.strip():
@@ -136,6 +140,14 @@ class LoopEngineConfig:
                 "LOOP_WORK_BRANCH_TEMPLATE", "loop/work-{issue}"
             ).strip()
             or "loop/work-{issue}",
+            initial_project_status=environment.get(
+                "LOOP_INITIAL_PROJECT_STATUS", "Backlog"
+            ).strip()
+            or "Backlog",
+            done_project_status=environment.get(
+                "LOOP_DONE_PROJECT_STATUS", "Done"
+            ).strip()
+            or "Done",
             self_improvement=_self_improvement_from_environment(environment),
         )
 
@@ -350,6 +362,14 @@ class LoopEngineeringSettings:
                 project.get("work_branch_template", "loop/work-{issue}").strip()
                 or "loop/work-{issue}"
             ),
+            initial_project_status=(
+                project.get("initial_project_status", "Backlog").strip()
+                or "Backlog"
+            ),
+            done_project_status=(
+                project.get("done_project_status", "Done").strip()
+                or "Done"
+            ),
             self_improvement=self_improvement,
         )
         model_config = ModelConfig(
@@ -432,6 +452,8 @@ class LoopEngineeringSettings:
                 "LOOP_ISSUE_LEVEL": engine.issue_level,
                 "LOOP_CI_WORKFLOW_NAME": engine.ci_workflow_name,
                 "LOOP_WORK_BRANCH_TEMPLATE": engine.work_branch_template,
+                "LOOP_INITIAL_PROJECT_STATUS": engine.initial_project_status,
+                "LOOP_DONE_PROJECT_STATUS": engine.done_project_status,
                 "LOOP_IMPLEMENTER_PROVIDER": self.models.implementer_provider,
                 "LOOP_IMPLEMENTER_MODEL": self.models.implementer_model,
                 "LOOP_REVIEWER_PROVIDER": self.models.reviewer_provider,
