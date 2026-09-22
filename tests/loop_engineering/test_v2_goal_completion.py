@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from pathlib import Path
 
 from loop_engineering.v2_bootstrap_state import BootstrapEffect
 from loop_engineering.v2_goal_completion import (
@@ -106,7 +107,7 @@ class FakeRunner:
 def registration() -> ProductDevelopmentRegistration:
     return ProductDevelopmentRegistration(
         product_key="sample",
-        workspace_canonical_path=__import__("pathlib").Path("/tmp/sample"),
+        workspace_canonical_path=Path("/tmp/sample"),
         repository_identity="owner/sample",
         project_owner="owner",
         project_number=10,
