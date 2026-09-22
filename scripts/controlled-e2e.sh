@@ -231,7 +231,7 @@ generation: 1
 - [ ] src/e2e_product.py の slugify(value: str) -> str を実装する
 - [ ] 前後の空白・記号を除去し、英字を小文字化する
 - [ ] 英数字以外の連続部分を単一の - に正規化する
-- [ ] python -m unittest discover -s tests -v が全PASSする
+- [ ] python3 -m unittest discover -s tests -v が全PASSする
 - [ ] docs/design.md に実装設計が存在する
 EOF
 
@@ -293,7 +293,7 @@ passes_required = 2
 
 [verification.command.1]
 identity = unit-tests
-argv_json = ["python", "-m", "unittest", "discover", "-s", "tests", "-v"]
+argv_json = ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"]
 working_directory = .
 timeout_seconds = 300
 required = true
@@ -421,7 +421,7 @@ git -C "$PRODUCTION" switch main
 git -C "$PRODUCTION" reset --hard origin/main
 (
   cd "$PRODUCTION"
-  python -m unittest discover -s tests -v
+  python3 -m unittest discover -s tests -v
 )
 
 echo "CONTROLLED_E2E_AUDIT=PASS"
