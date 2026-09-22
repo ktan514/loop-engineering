@@ -383,7 +383,7 @@ def validate_development_task_packet(packet: DevelopmentTaskPacket) -> str | Non
         return "TASK_PACKET_IDENTITY_INVALID"
     if not packet.workspace_canonical_path.is_absolute():
         return "TASK_PACKET_WORKSPACE_INVALID"
-    if not packet.scope_paths or any(not _safe_relative_path(path) for path in packet.scope_paths):
+    if not packet.scope_paths or any(not _safe_scope_path(path) for path in packet.scope_paths):
         return "TASK_PACKET_SCOPE_INVALID"
     if any(not _safe_relative_path(path) for path in packet.canonical_design_targets):
         return "TASK_PACKET_DESIGN_TARGET_INVALID"
@@ -399,6 +399,12 @@ def validate_development_task_packet(packet: DevelopmentTaskPacket) -> str | Non
     return None
 
 
+def _safe_scope_path(value: str) -> bool:
+    if value in {".", "./"}:
+        return True
+    return _safe_relative_path(value)
+
+
 def _safe_relative_path(value: str) -> bool:
     if not value or value != value.strip() or "\\" in value or "\x00" in value:
         return False
@@ -409,6 +415,8 @@ def _safe_relative_path(value: str) -> bool:
 def _path_in_scope(path: str, scopes: tuple[str, ...]) -> bool:
     for scope in scopes:
         normalized = scope.rstrip("/")
+        if normalized in {"", "."}:
+            return True
         if path == normalized or path.startswith(normalized + "/"):
             return True
     return False
