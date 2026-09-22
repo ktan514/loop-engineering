@@ -162,7 +162,12 @@ def test_unresolved_conflict_requires_intervention_when_nothing_else_is_actionab
 
 
 def test_goal_completion_requires_terminal_work_and_acceptance_evidence() -> None:
-    target = work(1, issue_state="CLOSED", lifecycle="COMPLETED")
+    target = work(
+        1,
+        issue_state="CLOSED",
+        lifecycle="COMPLETED",
+        project_status="Done",
+    )
 
     incomplete = V2Supervisor().decide(
         goal_revision="rev-1",
