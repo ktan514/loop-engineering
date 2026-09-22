@@ -214,3 +214,29 @@ model名をCore state machineへハードコードしない。
 - raw provider token/header/secretをlogしない
 - stale targetへPASSしない
 - same ReviewRequestKeyを不必要に二重provider callしない
+
+## 17. Local Review GateとReview Level
+
+Issue #98ではcanonical external reviewの前にLocal Review Gateを追加する。
+
+```text
+VERIFY_LOCAL
+→ LOCAL_REVIEW
+→ LOCAL_PASS
+→ EXTERNAL_REVIEW_L1
+→ EXTERNAL_REVIEW_L2
+→ ...
+→ EXTERNAL_REVIEW_LN
+```
+
+Local Reviewは実装Workerとはfresh sessionで分離し、Completion Contractを満たす構造化結果だけをPASS候補とする。
+
+External Reviewの各LevelはReviewerPortの別policy instanceであり、provider/modelは交換可能とする。Coreは特定model名を知らない。
+
+External `REQUEST_CHANGES`を修正してexact targetが変わった場合、旧HEADの全Review Level evidenceを無効化する。新HEADはfresh `LOCAL_PASS`後にLevel 1から再取得する。
+
+`ESCALATE`は次Level、alternate provider、またはHumanへ進める。`NOT_RUN`をPASSへ読み替えない。
+
+同一exact target / 同一Level / 同一canonical generationへの重複provider callはReviewRequestKeyで抑止する。
+
+詳細は `docs/architecture/local_llm_coder_integration.md` を正本とする。
