@@ -12,18 +12,37 @@ from pathlib import Path
 from typing import Protocol
 
 from .v2_autonomous_runner import TransitionExecutionResult, TransitionExecutionStatus
+from .config import ReviewLevelConfig
 from .v2_development_lineage import (
     GitHubDevelopmentLineageEffects,
     LineageIdentity,
     LineageStatus,
+    MaterializedProposal,
     TrustedProposalMaterializer,
+)
+from .v2_external_review import (
+    ExternalReviewCoordinator,
+    ExternalReviewState,
+    ExternalReviewStatus,
+    ExternalReviewTarget,
 )
 from .v2_goal_planning import BootstrapResult, PlannedWork, ProductDevelopmentRegistration
 from .v2_implementer import (
-    CodexProposalImplementer,
     DevelopmentTaskPacket,
     ImplementerStatus,
     ImplementerTransition,
+    V2ImplementerPort,
+    WorkspaceEffectReport,
+)
+from .v2_local_quality import (
+    LocalQualityContext,
+    LocalQualityCoordinator,
+    LocalQualityStage,
+    LocalQualityStatus,
+    LocalQualityTarget,
+    LocalQualityState,
+    VerificationCommandDescriptor,
+    clean_workspace_change_identity,
 )
 from .v2_supervisor import EvidenceState, V2SupervisorDecision, V2Transition, V2WorkObservation
 from .work_state import EffectAttempt, RecoveredWork, WorkCheckpoint, WorkRecord
@@ -55,6 +74,14 @@ class AutonomousTransitionCommandRunner(Protocol):
     ) -> CommandResultLike: ...
 
 
+class ExternalReviewStatePort(Protocol):
+    def get(self, work_identity: str) -> ExternalReviewState | None: ...
+
+
+class LocalQualityStatePort(Protocol):
+    def get(self, work_identity: str) -> LocalQualityState | None: ...
+
+
 class AutonomousWorkStatePort(Protocol):
     def recover(self, work_identity: str) -> RecoveredWork | None: ...
 
@@ -69,13 +96,19 @@ class AutonomousWorkStatePort(Protocol):
 
 @dataclass(slots=True)
 class V2AutonomousTransitionExecutor:
-    implementer: CodexProposalImplementer
+    implementer: V2ImplementerPort
     materializer: TrustedProposalMaterializer
     lineage: GitHubDevelopmentLineageEffects
     work_state: AutonomousWorkStatePort
     runner: AutonomousTransitionCommandRunner
     environment: Mapping[str, str]
-    scope_paths: tuple[str, ...]
+    local_quality: LocalQualityCoordinator
+    local_quality_state: LocalQualityStatePort
+    external_review: ExternalReviewCoordinator
+    external_review_state: ExternalReviewStatePort
+    review_levels: tuple[ReviewLevelConfig, ...]
+    verification_commands: tuple[VerificationCommandDescriptor, ...]
+    scope_paths: tuple[str, ...] = (".",)
     done_project_status: str = "Done"
 
     def execute(
@@ -91,8 +124,12 @@ class V2AutonomousTransitionExecutor:
             return _intervention("TRANSITION_DECISION_INVALID")
         if transition in {V2Transition.DESIGN, V2Transition.IMPLEMENT, V2Transition.REPAIR}:
             return self._develop(registration, work, planned_work, decision)
-        if transition in {V2Transition.VERIFY, V2Transition.REVIEW, V2Transition.HUMAN_VERIFY}:
-            return _waiting(f"{transition.value}_EVIDENCE_PENDING")
+        if transition is V2Transition.VERIFY:
+            return self._verify_local(registration, work, planned_work, decision)
+        if transition is V2Transition.REVIEW:
+            return self._review_external(registration, work, planned_work, decision)
+        if transition is V2Transition.HUMAN_VERIFY:
+            return _waiting("HUMAN_VERIFY_EVIDENCE_PENDING")
         if transition is V2Transition.INTEGRATE:
             return self._integrate(registration, work, decision.schedule_key)
         if transition is V2Transition.COMPLETE_WORK:
@@ -114,6 +151,23 @@ class V2AutonomousTransitionExecutor:
         remote_ref = branch if work.exact_head_sha is not None else registration.trunk_branch
         if not self._ensure_commit_available(registration, exact_base, remote_ref):
             return _waiting("DEVELOPMENT_BASE_FETCH_UNPROVEN")
+        if not self._prepare_workspace(registration, branch, exact_base):
+            return _intervention("DEVELOPMENT_WORKSPACE_PREPARE_FAILED")
+
+        approved_findings = ()
+        expected_change_identity: str | None = None
+        if decision.transition is V2Transition.REPAIR:
+            expected_change_identity = clean_workspace_change_identity(exact_base, branch)
+            external = self.external_review_state.get(work.work_identity)
+            if (
+                external is None
+                or external.status != "REQUEST_CHANGES"
+                or external.target_head_sha != exact_base
+                or external.change_identity != expected_change_identity
+                or not external.approved_findings
+            ):
+                return _intervention("EXTERNAL_REPAIR_FINDINGS_UNAVAILABLE")
+            approved_findings = external.approved_findings
 
         generation = _generation(decision.schedule_key)
         packet = DevelopmentTaskPacket(
@@ -139,22 +193,393 @@ class V2AutonomousTransitionExecutor:
                 "main/trunkへ直接commit/pushしない",
                 "GitHub mutationはTrusted Hostへ委譲する",
             ),
+            expected_change_identity=expected_change_identity,
+            approved_findings=approved_findings,
         )
         implemented = self.implementer.execute(packet)
+        if implemented.status is ImplementerStatus.INCOMPLETE:
+            return _waiting(implemented.detail)
         if implemented.status is ImplementerStatus.BLOCKED:
             return _intervention(implemented.detail)
-        if implemented.status is not ImplementerStatus.SUCCESS or implemented.proposal is None:
+        if implemented.status is not ImplementerStatus.SUCCESS:
             return _failed(implemented.detail)
 
-        materialized = self.materializer.materialize(
-            workspace=registration.workspace_canonical_path,
-            repository=registration.repository_identity,
-            proposal=implemented.proposal,
-            commit_message=_commit_message(decision.transition, work.issue_number),
-        )
+        materialized: MaterializedProposal | None = None
+        if implemented.proposal is not None:
+            materialized = self.materializer.materialize(
+                workspace=registration.workspace_canonical_path,
+                repository=registration.repository_identity,
+                proposal=implemented.proposal,
+                commit_message=_commit_message(decision.transition, work.issue_number),
+            )
+        elif implemented.workspace_effect is not None:
+            materialized = self._materialize_workspace_effect(
+                registration,
+                work,
+                branch,
+                exact_base,
+                implemented.workspace_effect,
+                _commit_message(decision.transition, work.issue_number),
+            )
         if materialized is None:
-            return _failed("PROPOSAL_MATERIALIZATION_FAILED")
+            return _failed("DEVELOPMENT_MATERIALIZATION_FAILED")
 
+        published = self._publish_materialized(
+            registration,
+            work,
+            branch,
+            generation,
+            materialized,
+        )
+        if isinstance(published, TransitionExecutionResult):
+            return published
+
+        self._advance_work(
+            work,
+            lifecycle="RUNNING",
+            selected_transition=decision.transition.value,
+            active_lineage_identity=f"pr:{published.pull_request.number}",
+            next_action=(
+                "IMPLEMENT_SAME_LINEAGE"
+                if decision.transition is V2Transition.DESIGN
+                else "VERIFY_LOCAL"
+            ),
+            evidence=(f"head:{published.pull_request.head_sha}",),
+            schedule_key=decision.schedule_key,
+        )
+        return _progressed(published.detail)
+
+    def _verify_local(
+        self,
+        registration: ProductDevelopmentRegistration,
+        work: V2WorkObservation,
+        planned: PlannedWork,
+        decision: V2SupervisorDecision,
+    ) -> TransitionExecutionResult:
+        if work.exact_head_sha is None or decision.schedule_key is None:
+            return _intervention("LOCAL_QUALITY_TARGET_MISSING")
+        branch = _work_branch(registration.work_branch_template, work.issue_number)
+        if not self._prepare_workspace(registration, branch, work.exact_head_sha):
+            return _intervention("LOCAL_QUALITY_WORKSPACE_PREPARE_FAILED")
+        change_identity = clean_workspace_change_identity(work.exact_head_sha, branch)
+        target = LocalQualityTarget(
+            repository_identity=registration.repository_identity,
+            work_identity=work.work_identity,
+            exact_head_sha=work.exact_head_sha,
+            change_identity=change_identity,
+            active_lineage_identity=work.active_lineage_identity or "",
+            canonical_design_identities=work.canonical_design_identities,
+            acceptance_digest=work.acceptance_digest or "",
+            scope_paths=self.scope_paths,
+        )
+        context = LocalQualityContext(
+            target=target,
+            workspace_canonical_path=registration.workspace_canonical_path,
+            packet_identity=decision.schedule_key,
+            generation=_generation(decision.schedule_key),
+            goal_revision=registration.goal_revision,
+            issue_revision=work.issue_revision,
+            acceptance_checks=planned.acceptance_criteria,
+            authority_refs=(
+                registration.goal_definition_identity,
+                f"Issue #{work.issue_number}",
+            ),
+            non_goals=(),
+            safety_constraints=(
+                "main/trunkへ直接commit/pushしない",
+                "reviewerはread-only",
+            ),
+            verification_commands=self.verification_commands,
+        )
+        result = self.local_quality.run(context)
+        if result.status is LocalQualityStatus.INCOMPLETE:
+            return _waiting(result.detail)
+        if result.status is LocalQualityStatus.BLOCKED:
+            return _intervention(result.detail)
+        if result.local_pass_identity is None:
+            return _intervention("LOCAL_PASS_IDENTITY_MISSING")
+
+        current_head = self._git_output(
+            registration.workspace_canonical_path,
+            ("rev-parse", "HEAD"),
+        )
+        dirty = self._workspace_changed_paths(registration.workspace_canonical_path)
+        if current_head is None or dirty is None:
+            return _intervention("LOCAL_QUALITY_READBACK_FAILED")
+
+        if current_head != work.exact_head_sha or dirty:
+            materialized = self._materialize_current_workspace(
+                registration,
+                work,
+                branch,
+                work.exact_head_sha,
+                "fix: #"
+                + str(work.issue_number)
+                + " のLocal Quality指摘を反映する",
+            )
+            if materialized is None:
+                return _intervention("LOCAL_REPAIR_MATERIALIZATION_FAILED")
+            published = self._publish_materialized(
+                registration,
+                work,
+                branch,
+                _generation(decision.schedule_key),
+                materialized,
+            )
+            if isinstance(published, TransitionExecutionResult):
+                return published
+            self._advance_work(
+                work,
+                lifecycle="RUNNING",
+                selected_transition=V2Transition.REPAIR.value,
+                active_lineage_identity=f"pr:{published.pull_request.number}",
+                next_action="VERIFY_LOCAL",
+                evidence=(f"head:{published.pull_request.head_sha}",),
+                schedule_key=decision.schedule_key,
+            )
+            return _progressed("LOCAL_REPAIR_PUBLISHED")
+
+        self._advance_work(
+            work,
+            lifecycle="RUNNING",
+            selected_transition=V2Transition.VERIFY.value,
+            active_lineage_identity=work.active_lineage_identity,
+            next_action="EXTERNAL_REVIEW",
+            evidence=(result.local_pass_identity,),
+            schedule_key=decision.schedule_key,
+        )
+        return _progressed("LOCAL_PASS_CONFIRMED")
+
+    def _review_external(
+        self,
+        registration: ProductDevelopmentRegistration,
+        work: V2WorkObservation,
+        planned: PlannedWork,
+        decision: V2SupervisorDecision,
+    ) -> TransitionExecutionResult:
+        if work.exact_head_sha is None or decision.schedule_key is None:
+            return _intervention("EXTERNAL_REVIEW_TARGET_MISSING")
+        pr_number = _pr_number(work.active_lineage_identity)
+        if pr_number is None:
+            return _intervention("EXTERNAL_REVIEW_PR_MISSING")
+        branch = _work_branch(registration.work_branch_template, work.issue_number)
+        if not self._prepare_workspace(registration, branch, work.exact_head_sha):
+            return _intervention("EXTERNAL_REVIEW_WORKSPACE_PREPARE_FAILED")
+        change_identity = clean_workspace_change_identity(work.exact_head_sha, branch)
+        local = self.local_quality_state.get(work.work_identity)
+        if (
+            local is None
+            or local.stage is not LocalQualityStage.LOCAL_PASS
+            or local.target_head_sha != work.exact_head_sha
+            or local.change_identity != change_identity
+            or local.local_pass_identity is None
+        ):
+            return _intervention("EXTERNAL_REVIEW_LOCAL_PASS_STALE")
+        canonical_context = self._canonical_context(
+            registration.workspace_canonical_path,
+            planned.canonical_design_targets,
+        )
+        if canonical_context is None:
+            return _intervention("EXTERNAL_REVIEW_CANONICAL_CONTEXT_UNAVAILABLE")
+        target = ExternalReviewTarget(
+            repository_identity=registration.repository_identity,
+            work_identity=work.work_identity,
+            issue_number=work.issue_number,
+            pr_number=pr_number,
+            exact_head_sha=work.exact_head_sha,
+            change_identity=change_identity,
+            active_lineage_identity=work.active_lineage_identity or "",
+            canonical_design_identities=work.canonical_design_identities,
+            acceptance_digest=work.acceptance_digest or "",
+            scope_paths=self.scope_paths,
+            local_pass_identity=local.local_pass_identity,
+            acceptance_checks=planned.acceptance_criteria,
+            canonical_context=canonical_context,
+            verification_evidence=(
+                local.verification_identity or local.local_pass_identity,
+            ),
+            non_goals=(),
+        )
+        result = self.external_review.run(target, self.review_levels)
+        if result.status is ExternalReviewStatus.WAITING:
+            return _waiting(result.detail)
+        if result.status is ExternalReviewStatus.REQUEST_CHANGES:
+            self._advance_work(
+                work,
+                lifecycle="RUNNING",
+                selected_transition=V2Transition.REVIEW.value,
+                active_lineage_identity=work.active_lineage_identity,
+                next_action="REPAIR_EXTERNAL_FINDINGS",
+                evidence=(
+                    f"external-review-level:{result.level}:pass:{result.pass_index}",
+                ),
+                schedule_key=decision.schedule_key,
+            )
+            return _progressed("EXTERNAL_REVIEW_REQUEST_CHANGES")
+        if result.status in {
+            ExternalReviewStatus.ESCALATE,
+            ExternalReviewStatus.BLOCKED,
+        }:
+            return _intervention(result.detail)
+        if result.external_pass_identity is None:
+            return _intervention("EXTERNAL_PASS_IDENTITY_MISSING")
+        self._advance_work(
+            work,
+            lifecycle="RUNNING",
+            selected_transition=V2Transition.REVIEW.value,
+            active_lineage_identity=work.active_lineage_identity,
+            next_action="INTEGRATE",
+            evidence=(result.external_pass_identity,),
+            schedule_key=decision.schedule_key,
+        )
+        return _progressed("EXTERNAL_PASS_CONFIRMED")
+
+
+    def _prepare_workspace(
+        self,
+        registration: ProductDevelopmentRegistration,
+        branch: str,
+        exact_head: str,
+    ) -> bool:
+        root = registration.workspace_canonical_path
+        status = self._git_output(root, ("status", "--porcelain"))
+        if status is None or status.strip():
+            return False
+        current_head = self._git_output(root, ("rev-parse", "HEAD"))
+        current_branch = self._git_output(root, ("branch", "--show-current"))
+        if current_head == exact_head and current_branch == branch:
+            return True
+        switched = self._run(
+            ("git", "switch", "-C", branch, exact_head),
+            root,
+            timeout_seconds=180,
+        )
+        if not switched.succeeded:
+            return False
+        return (
+            self._git_output(root, ("rev-parse", "HEAD")) == exact_head
+            and self._git_output(root, ("branch", "--show-current")) == branch
+            and self._git_output(root, ("status", "--porcelain")) == ""
+        )
+
+    def _materialize_workspace_effect(
+        self,
+        registration: ProductDevelopmentRegistration,
+        work: V2WorkObservation,
+        branch: str,
+        exact_base: str,
+        effect: WorkspaceEffectReport,
+        commit_message: str,
+    ) -> MaterializedProposal | None:
+        if (
+            effect.work_identity != work.work_identity
+            or effect.input_target_identity != exact_base
+        ):
+            return None
+        current_head = self._git_output(
+            registration.workspace_canonical_path,
+            ("rev-parse", "HEAD"),
+        )
+        current_branch = self._git_output(
+            registration.workspace_canonical_path,
+            ("branch", "--show-current"),
+        )
+        if current_head != effect.result_target_identity or current_branch != branch:
+            return None
+        return self._materialize_current_workspace(
+            registration,
+            work,
+            branch,
+            exact_base,
+            commit_message,
+        )
+
+    def _materialize_current_workspace(
+        self,
+        registration: ProductDevelopmentRegistration,
+        work: V2WorkObservation,
+        branch: str,
+        exact_base: str,
+        commit_message: str,
+    ) -> MaterializedProposal | None:
+        root = registration.workspace_canonical_path
+        current_branch = self._git_output(root, ("branch", "--show-current"))
+        current_head = self._git_output(root, ("rev-parse", "HEAD"))
+        if current_branch != branch or current_head is None:
+            return None
+        if not self._is_ancestor(root, exact_base, current_head):
+            return None
+
+        dirty = self._workspace_changed_paths(root)
+        if dirty is None:
+            return None
+        if any(not _path_in_scope(path, self.scope_paths) for path in dirty):
+            return None
+        if dirty:
+            add_args = ("add", "-A", "--", *self.scope_paths)
+            if not self._run(("git", *add_args), root).succeeded:
+                return None
+            staged = self._git_output(root, ("diff", "--cached", "--name-only", "HEAD"))
+            staged_paths = tuple(
+                line.strip() for line in (staged or "").splitlines() if line.strip()
+            )
+            if not staged_paths or any(
+                not _path_in_scope(path, self.scope_paths) for path in staged_paths
+            ):
+                return None
+            if not self._run(
+                ("git", "diff", "--cached", "--check", "HEAD"),
+                root,
+            ).succeeded:
+                return None
+            committed = self._run(
+                ("git", "commit", "-m", commit_message),
+                root,
+                timeout_seconds=180,
+            )
+            if not committed.succeeded:
+                return None
+
+        candidate = self._git_output(root, ("rev-parse", "HEAD"))
+        if candidate is None or candidate == exact_base:
+            return None
+        if not self._is_ancestor(root, exact_base, candidate):
+            return None
+        changed = self._git_output(
+            root,
+            ("diff", "--name-only", exact_base, candidate, "--"),
+        )
+        if changed is None:
+            return None
+        changed_paths = tuple(
+            line.strip() for line in changed.splitlines() if line.strip()
+        )
+        if not changed_paths or any(
+            not _path_in_scope(path, self.scope_paths) for path in changed_paths
+        ):
+            return None
+        patch = self._git_output(
+            root,
+            ("diff", "--binary", "--no-ext-diff", exact_base, candidate, "--"),
+        )
+        if patch is None or not patch:
+            return None
+        return MaterializedProposal(
+            work_identity=work.work_identity,
+            exact_base_sha=exact_base,
+            candidate_sha=candidate,
+            changed_paths=changed_paths,
+            patch_sha256=hashlib.sha256(patch.encode()).hexdigest(),
+        )
+
+    def _publish_materialized(
+        self,
+        registration: ProductDevelopmentRegistration,
+        work: V2WorkObservation,
+        branch: str,
+        generation: int,
+        materialized: MaterializedProposal,
+    ):
         published = self.lineage.publish(
             LineageIdentity(
                 registration.repository_identity,
@@ -170,21 +595,59 @@ class V2AutonomousTransitionExecutor:
             return _intervention(published.detail)
         if published.status is not LineageStatus.CONFIRMED or published.pull_request is None:
             return _failed(published.detail)
+        return published
 
-        self._advance_work(
-            work,
-            lifecycle="RUNNING",
-            selected_transition=decision.transition.value,
-            active_lineage_identity=f"pr:{published.pull_request.number}",
-            next_action=(
-                "IMPLEMENT_SAME_LINEAGE"
-                if decision.transition is V2Transition.DESIGN
-                else "OBSERVE_EXACT_HEAD_EVIDENCE"
-            ),
-            evidence=(f"head:{published.pull_request.head_sha}",),
-            schedule_key=decision.schedule_key,
+    def _workspace_changed_paths(self, root: Path) -> tuple[str, ...] | None:
+        staged = self._git_output(root, ("diff", "--cached", "--name-only", "HEAD"))
+        unstaged = self._git_output(root, ("diff", "--name-only", "--"))
+        untracked = self._git_output(
+            root,
+            ("ls-files", "--others", "--exclude-standard"),
         )
-        return _progressed(published.detail)
+        if staged is None or unstaged is None or untracked is None:
+            return None
+        return tuple(
+            sorted(
+                {
+                    line.strip()
+                    for raw in (staged, unstaged, untracked)
+                    for line in raw.splitlines()
+                    if line.strip()
+                }
+            )
+        )
+
+    def _canonical_context(
+        self,
+        root: Path,
+        targets: tuple[str, ...],
+    ) -> tuple[tuple[str, str], ...] | None:
+        if not targets:
+            return None
+        result: list[tuple[str, str]] = []
+        for relative in targets:
+            path = root / relative
+            try:
+                resolved = path.resolve(strict=True)
+                if not resolved.is_relative_to(root.resolve(strict=False)):
+                    return None
+                content = resolved.read_text(encoding="utf-8")
+            except (OSError, UnicodeError, ValueError):
+                return None
+            if not content.strip():
+                return None
+            result.append((relative, content))
+        return tuple(result)
+
+    def _is_ancestor(self, root: Path, older: str, newer: str) -> bool:
+        return self._run(
+            ("git", "merge-base", "--is-ancestor", older, newer),
+            root,
+        ).succeeded
+
+    def _git_output(self, root: Path, arguments: Sequence[str]) -> str | None:
+        result = self._run(("git", *arguments), root)
+        return result.output.strip() if result.succeeded else None
 
     def _integrate(
         self,
@@ -753,6 +1216,16 @@ def _pr_number(identity: str | None) -> int | None:
         return None
     number = int(match.group(1))
     return number if number > 0 else None
+
+
+def _path_in_scope(path: str, scopes: tuple[str, ...]) -> bool:
+    for scope in scopes:
+        normalized = scope.rstrip("/")
+        if normalized in {"", "."}:
+            return True
+        if path == normalized or path.startswith(normalized + "/"):
+            return True
+    return False
 
 
 def _work_branch(template: str, issue_number: int) -> str:
