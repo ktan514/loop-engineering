@@ -1,6 +1,7 @@
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+
 from loop_engineering.config import ReviewLevelConfig
 from loop_engineering.v2_external_review import (
     ExternalReviewCoordinator,
