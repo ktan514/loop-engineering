@@ -258,6 +258,8 @@ class GitHubGoalCompletion:
                         expected_effect=after,
                     )
                 )
+            if existing.status == "NO_EFFECT":
+                continue
             if (
                 existing.kind != kind
                 or existing.target_identity != target_identity
@@ -265,8 +267,7 @@ class GitHubGoalCompletion:
                 or existing.expected_effect != after
             ):
                 raise RuntimeError("GOAL_COMPLETION_EFFECT_CONFLICT")
-            if existing.status != "NO_EFFECT":
-                return existing
+            return existing
         raise RuntimeError("GOAL_COMPLETION_EFFECT_GENERATION_EXHAUSTED")
 
     def _issue_state(self, repository: str, issue_number: int) -> str | None:
