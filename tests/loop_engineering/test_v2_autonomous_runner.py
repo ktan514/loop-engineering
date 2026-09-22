@@ -108,7 +108,7 @@ class MemoryRuntime(PostgreSQLAutonomousRuntimeStore):
         return frozenset(
             key
             for key, item in self.dispatches.items()
-            if item.status in {"DISPATCHED", "COMPLETED", "WAITING"}
+            if item.status in {"DISPATCHED", "COMPLETED"}
         )
 
 
