@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from loop_engineering.v2_implementer import (
+    DevelopmentTaskPacket,
     ImplementerFinding,
     ImplementerResult,
     ImplementerStatus,
@@ -112,9 +113,9 @@ class SequenceImplementer:
     def __init__(self, results: list[ImplementerResult]) -> None:
         self.results = results
         self.calls = 0
-        self.packets = []
+        self.packets: list[DevelopmentTaskPacket] = []
 
-    def execute(self, packet):
+    def execute(self, packet: DevelopmentTaskPacket) -> ImplementerResult:
         self.packets.append(packet)
         value = self.results[self.calls]
         self.calls += 1
@@ -238,7 +239,7 @@ def repaired_effect() -> ImplementerResult:
             request_identity="worker:1",
             packet_identity="repair:1",
             work_identity=target().work_identity,
-            transition=None,  # type: ignore[arg-type]
+            transition=None,
             input_target_identity=target().exact_head_sha,
             result_target_identity="c" * 40,
             change_identity="sha256:" + "d" * 64,
@@ -251,10 +252,10 @@ def repaired_effect() -> ImplementerResult:
 def test_first_pass_creates_local_pass() -> None:
     store = MemoryStore()
     result = LocalQualityCoordinator(
-        store,  # type: ignore[arg-type]
-        SequenceVerifier([verification(LocalVerificationStatus.PASS)]),  # type: ignore[arg-type]
+        store,
+        SequenceVerifier([verification(LocalVerificationStatus.PASS)]),
         SequenceReviewer([review_pass()]),
-        SequenceImplementer([]),  # type: ignore[arg-type]
+        SequenceImplementer([]),
     ).run(context())
 
     assert result.status is LocalQualityStatus.PASS
@@ -278,15 +279,15 @@ def test_blocking_finding_repairs_then_restarts_verification_and_review() -> Non
     )
     implementer = SequenceImplementer([repaired_effect()])
     coordinator = LocalQualityCoordinator(
-        MemoryStore(),  # type: ignore[arg-type]
+        MemoryStore(),
         SequenceVerifier(
             [
                 verification(LocalVerificationStatus.PASS),
                 verification(LocalVerificationStatus.PASS),
             ]
-        ),  # type: ignore[arg-type]
+        ),
         SequenceReviewer([review_findings(), second_review]),
-        implementer,  # type: ignore[arg-type]
+        implementer,
     )
 
     result = coordinator.run(context(first_target))
@@ -309,10 +310,10 @@ def test_review_incomplete_does_not_become_pass() -> None:
         ("timeout",),
     )
     result = LocalQualityCoordinator(
-        MemoryStore(),  # type: ignore[arg-type]
-        SequenceVerifier([verification(LocalVerificationStatus.PASS)]),  # type: ignore[arg-type]
+        MemoryStore(),
+        SequenceVerifier([verification(LocalVerificationStatus.PASS)]),
         SequenceReviewer([incomplete]),
-        SequenceImplementer([]),  # type: ignore[arg-type]
+        SequenceImplementer([]),
     ).run(context())
 
     assert result.status is LocalQualityStatus.INCOMPLETE
@@ -333,8 +334,8 @@ def test_target_change_invalidates_old_local_pass() -> None:
     store = MemoryStore(old)
 
     result = LocalQualityCoordinator(
-        store,  # type: ignore[arg-type]
-        SequenceVerifier([verification(LocalVerificationStatus.PASS)]),  # type: ignore[arg-type]
+        store,
+        SequenceVerifier([verification(LocalVerificationStatus.PASS)]),
         SequenceReviewer(
             [
                 LocalReviewExecutionResult(
@@ -349,7 +350,7 @@ def test_target_change_invalidates_old_local_pass() -> None:
                 )
             ]
         ),
-        SequenceImplementer([]),  # type: ignore[arg-type]
+        SequenceImplementer([]),
     ).run(context(new))
 
     assert result.status is LocalQualityStatus.PASS
