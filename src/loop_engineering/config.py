@@ -148,6 +148,7 @@ class ModelConfig:
     reviewer_provider: str
     reviewer_model: str
     reviewer_api_base: str
+    implementer_profile: str | None = None
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -159,6 +160,33 @@ class ModelConfig:
         ):
             if not value.strip():
                 raise ValueError(f"{name}を空文字にはできません")
+        if self.implementer_profile is not None and not self.implementer_profile.strip():
+            raise ValueError("implementer_profileを空文字にはできません")
+
+
+@dataclass(frozen=True, slots=True)
+class LocalLlmCoderConfig:
+    """local-llm-coder Worker Backendの非秘密設定。"""
+
+    root: Path
+    production_name: str
+    model_profile: str
+
+    def __post_init__(self) -> None:
+        if not self.root.is_absolute():
+            raise ValueError("local_llm_coder.rootは絶対pathで指定してください")
+        if (
+            not self.production_name
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", self.production_name) is None
+            or self.production_name in {".", ".."}
+        ):
+            raise ValueError("local_llm_coder.production_nameが不正です")
+        if not self.model_profile.strip():
+            raise ValueError("local_llm_coder.model_profileを空文字にはできません")
+
+    @property
+    def active_production_path(self) -> Path:
+        return (self.root / "productions" / self.production_name).resolve(strict=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +218,7 @@ class LoopEngineeringSettings:
     engine: LoopEngineConfig
     models: ModelConfig
     secrets: SecretReferenceConfig
+    local_llm_coder: LocalLlmCoderConfig | None = None
 
     @classmethod
     def load(
@@ -266,7 +295,9 @@ class LoopEngineeringSettings:
                 models.get("reviewer_api_base", "https://api.openai.com/v1").strip()
                 or "https://api.openai.com/v1"
             ),
+            implementer_profile=models.get("implementer_profile", "").strip() or None,
         )
+        local_llm_coder = _local_llm_coder_from_parser(parser, model_config)
         secrets = SecretReferenceConfig(
             github_token_env=(
                 credentials.get("github_token_env", "GH_TOKEN").strip() or "GH_TOKEN"
@@ -291,6 +322,7 @@ class LoopEngineeringSettings:
             engine=engine,
             models=model_config,
             secrets=secrets,
+            local_llm_coder=local_llm_coder,
         )
 
     def runtime_environment(
@@ -332,6 +364,26 @@ class LoopEngineeringSettings:
                 "LOOP_REVIEWER_API_BASE": self.models.reviewer_api_base,
             }
         )
+        if self.models.implementer_profile is None:
+            values.pop("LOOP_IMPLEMENTER_PROFILE", None)
+        else:
+            values["LOOP_IMPLEMENTER_PROFILE"] = self.models.implementer_profile
+        if self.local_llm_coder is None:
+            for name in (
+                "LOOP_LOCAL_LLM_CODER_ROOT",
+                "LOOP_LOCAL_LLM_CODER_PRODUCTION",
+                "LOOP_LOCAL_LLM_CODER_MODEL_PROFILE",
+            ):
+                values.pop(name, None)
+        else:
+            values["LOOP_LOCAL_LLM_CODER_ROOT"] = str(self.local_llm_coder.root)
+            values["LOOP_LOCAL_LLM_CODER_PRODUCTION"] = (
+                self.local_llm_coder.production_name
+            )
+            values["LOOP_LOCAL_LLM_CODER_MODEL_PROFILE"] = (
+                self.local_llm_coder.model_profile
+            )
+
         sink = engine.self_improvement
         values["LOOP_SELF_IMPROVEMENT_ENABLED"] = "true" if sink.enabled else "false"
         for name, value in (
@@ -435,6 +487,26 @@ def _configured_path(platform_root: Path, environment: Mapping[str, str]) -> Pat
     if raw:
         return Path(raw)
     return platform_root / "config" / "loop-engineering.ini"
+
+
+def _local_llm_coder_from_parser(
+    parser: ConfigParser,
+    models: ModelConfig,
+) -> LocalLlmCoderConfig | None:
+    if models.implementer_provider != "local-llm-coder":
+        return None
+    if not parser.has_section("local_llm_coder"):
+        raise ValueError("設定section [local_llm_coder] がありません")
+    section = parser["local_llm_coder"]
+    root = Path(_required(section, "root")).expanduser()
+    if not root.is_absolute():
+        raise ValueError("local_llm_coder.rootは絶対pathで指定してください")
+    profile = models.implementer_profile or models.implementer_model
+    return LocalLlmCoderConfig(
+        root=root.resolve(strict=False),
+        production_name=_required(section, "production_name"),
+        model_profile=profile,
+    )
 
 
 def _section(parser: ConfigParser, name: str) -> SectionProxy:

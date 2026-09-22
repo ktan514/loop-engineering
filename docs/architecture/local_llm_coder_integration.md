@@ -3,7 +3,7 @@
 Owner: Issue #98
 Parent: Issue #81
 関連: #85 / #87 / #88
-Status: canonical design candidate
+Status: canonical architecture / V2 manufacturing
 
 ## 1. 目的
 
@@ -116,20 +116,22 @@ Loop Engineeringと`local-llm-coder`はProduct固有の意味Authorityを複製�
 
 Loop Engineeringは`LocalLlmCoderAdapter`相当のAdapterから`local-llm-coder`を呼び出す。Core Portはprovider固有名称へ依存しない。
 
-概念契約:
+Worker v1のversioned契約:
 
 ```text
 LocalWorkerRequest
+- schema_version = 1
 - request_identity
 - task_packet_identity
 - role
 - transition
+- effect_requirement
 - repository_identity
 - workspace_canonical_path
 - input_target_identity
 - exact_base_sha
-- expected_head_identity?
-- active_lineage_identity
+- expected_change_identity?
+- active_lineage_identity?
 - authority_refs[]
 - scope_paths[]
 - canonical_refs[]
@@ -137,8 +139,11 @@ LocalWorkerRequest
 - non_goals[]
 - safety_constraints[]
 - model_profile
+- task
+- approved_findings[]
 
 LocalWorkerResult
+- schema_version = 1
 - request_identity
 - task_packet_identity
 - role
@@ -146,13 +151,21 @@ LocalWorkerResult
 - result_target_identity?
 - change_identity?
 - status
+- failure_kind?
 - completion
 - findings[]
 - changed_paths[]
 - verification_evidence[]
 - diagnostics[]
-- artifact_refs[]
+- session_id?
+- artifacts
+  - runtime_directory?
+  - event_log?
+  - stderr_log?
+  - agent_artifact_refs[]
 ```
+
+`effect_requirement`は`MAY_CHANGE` / `MUST_CHANGE` / `MUST_NOT_CHANGE`のいずれかとする。DESIGN / IMPLEMENTは`IMPLEMENTER`、REPAIRは`FIXER`へ写像し、通常の変更工程は`MUST_CHANGE`とする。FIXERはHostがreadback済みの`expected_change_identity`と承認済み`approved_findings`へbindする。Self Reviewerは#101で`SELF_REVIEWER` + `MUST_NOT_CHANGE`として接続する。 DESIGNの`scope_paths`は`canonical_design_targets`へ必ず狭め、通常の実装scopeをそのまま渡さない。IMPLEMENT / REPAIRはTaskPacketの変更scopeを使用する。
 
 `role`:
 
@@ -175,12 +188,14 @@ process終了コード0だけで`PASS`へ昇格しない。
 Worker roleごとにtarget identityの意味を混同しない。
 
 - Implementer / Fixer入力は変更開始前の`input_target_identity`と`exact_base_sha`へbindする。
-- proposal modeでは変更後HEADがまだ存在しないため、結果は`change_identity`（patch/proposal identity）を返し、`result_target_identity`はHostが変更適用・readback後に確定する。
-- remote-effects modeでWorker自身がcommit等を行う場合だけ、結果に`result_target_identity`を含められる。ただしHostのfresh readbackなしに確定事実へ昇格しない。
+- Codex proposal modeは変更前Workspaceを直接採用せず、`ChangeProposal.patch_sha256`をproposal identityとして返す。
+- local-llm-coder Worker v1は登録済みActive Productionを変更するWorkspace-effect modeである。成功結果の`result_target_identity`はWorker終了後readback時点のHEAD、`change_identity`はHEAD / branch / staged / unstaged / untrackedを含むWorkspace identityである。uncommitted変更だけなら`result_target_identity`は入力HEADと同一でもよい。
+- local-llm-coderの`changed_paths`はWorker前後のHost readbackで観測したeffect pathであり、`MUST_CHANGE`のPASSでは空を許さない。
+- Workerがforward commitを作成した場合も`result_target_identity` / `change_identity`を同じresult契約で返す。Loop Engineering Adapterはprocess終了コードではなくstructured resultをAuthorityとして再検証する。
 - Self ReviewerはHostがreadback済みのexact `result_target_identity` / `change_identity`へbindする。
 - Local/External Review evidenceはreview対象HEADまたはchange identityが変わればstaleになる。
 
-既存`ChangeProposal.exact_base_sha` / `patch_sha256`と、`ReviewTarget.head_identity` / `change_identity`の区別を維持する。
+したがってImplementerPortの成功結果は`ChangeProposal`と`WorkspaceEffectReport`を区別する。既存Codex Adapterは前者、local-llm-coder Adapterは後者を返し、#88のRunner compositionで採用経路を分岐する。
 
 ### 3.2 Workspace identity
 
@@ -193,10 +208,16 @@ local-llm-coder Backendを選択するWorkでは、Loop Engineeringの`workspace
 Loop Engineering側のBackend設定は最低限次を持つ。
 
 ```text
-local_llm_coder_root
-production_name
-model_profile
+[models]
+implementer_provider = local-llm-coder
+implementer_profile = <profile>
+
+[local_llm_coder]
+root = <absolute local-llm-coder root>
+production_name = <production directory name>
 ```
+
+設定loaderはこれを`local_llm_coder_root` / `production_name` / `model_profile`のBackend設定へ正規化する。移行期間は既存`implementer_model`を`implementer_profile`未指定時の互換入力として扱う。
 
 Adapterは次を照合する。
 
