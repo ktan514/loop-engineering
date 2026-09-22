@@ -219,7 +219,9 @@ def test_request_changes_returns_supervisor_to_repair() -> None:
     observation = replace(
         work(),
         verification_state=EvidenceState.PASS,
-        verification_identity="ci:10",
+        verification_identity="local-pass:1",
+        ci_state=EvidenceState.PASS,
+        ci_identity="ci:10",
         review_state=review.state,
         review_identity=review.identity,
     )
@@ -303,7 +305,8 @@ def test_apply_evidence_requires_same_head() -> None:
     )
     updated = apply_evidence(work(), bundle)
 
-    assert updated.verification_state is EvidenceState.PASS
+    assert updated.ci_state is EvidenceState.PASS
+    assert updated.ci_identity == "ci"
     assert updated.review_state is EvidenceState.PASS
 
 
