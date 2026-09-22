@@ -322,43 +322,20 @@ External Reviewは`LOCAL_PASS`後に開始する。
 
 ```text
 LOCAL_PASS
-→ LOW_REVIEW_1
-→ LOW_FINAL_REVIEW
-→ HIGH_REVIEW_1
-→ HIGH_FINAL_REVIEW
+→ EXTERNAL_REVIEW_L1
+→ EXTERNAL_REVIEW_L2
+→ ...
+→ EXTERNAL_REVIEW_LN
 → EXTERNAL_PASS
 ```
 
-外部レビューは、現在の標準完成policyでは **低レベルAPI → 高レベルAPI** の2段階とし、各段階でfreshな2回連続PASSを要求する。
+各LevelはReviewerPortの別policy instanceとして扱い、provider/modelをCoreへ埋め込まない。
+
+各Level設定は最低限次を持つ。
 
 ```text
-LOCAL_PASS
-→ LOW_REVIEW_1
-   ├─ REQUEST_CHANGES → LOCAL_REPAIR → VERIFY_LOCAL → LOCAL_REVIEW → LOCAL_PASS → LOW_REVIEW_1
-   └─ PASS → LOW_FINAL_REVIEW
-→ LOW_FINAL_REVIEW
-   ├─ REQUEST_CHANGES → LOCAL_REPAIR → VERIFY_LOCAL → LOCAL_REVIEW → LOCAL_PASS → LOW_REVIEW_1
-   └─ PASS → HIGH_REVIEW_1
-→ HIGH_REVIEW_1
-   ├─ REQUEST_CHANGES → LOCAL_REPAIR → VERIFY_LOCAL → LOCAL_REVIEW → LOCAL_PASS → LOW_REVIEW_1
-   └─ PASS → HIGH_FINAL_REVIEW
-→ HIGH_FINAL_REVIEW
-   ├─ REQUEST_CHANGES → LOCAL_REPAIR → VERIFY_LOCAL → LOCAL_REVIEW → LOCAL_PASS → LOW_REVIEW_1
-   └─ PASS → EXTERNAL_PASS
-```
-
-どの外部レビュー段階で修正が入っても、修正後targetは必ずLocal Quality Loopからやり直し、低レベルAPIの1回目レビューへ戻る。旧targetのLocal/Low/High PASSはすべてstaleであり、新targetへ流用しない。
-
-同じexact targetであっても、`LOW_REVIEW_1`と`LOW_FINAL_REVIEW`、`HIGH_REVIEW_1`と`HIGH_FINAL_REVIEW`は別ReviewRequestとしてfreshに実行する。1回目のPASSだけで次のLevel完了としない。
-
-各Review StageはReviewerPortの別policy instanceとして扱い、provider/modelをCoreへ埋め込まない。
-
-各Stage設定は最低限次を持つ。
-
-```text
-ReviewStagePolicy
+ReviewLevelPolicy
 - level
-- pass_index
 - provider
 - model
 - api_base
@@ -368,8 +345,6 @@ ReviewStagePolicy
 - context_policy
 - escalation_policy
 ```
-
-ReviewRequestKeyにはlevel / pass_index / provider policy / exact targetを含める。同じStageの重複provider callは抑止するが、fresh final reviewはpass_indexが異なるため別requestとなる。
 
 review resultは既存`ReviewResult`契約へ正規化する。
 
@@ -383,16 +358,16 @@ review resultは既存`ReviewResult`契約へ正規化する。
 外部review findingがvalidなら:
 
 ```text
-CURRENT_EXTERNAL_STAGE
+EXTERNAL_REVIEW_Ln
 → VALIDATE_EXTERNAL_FINDINGS
 → REPAIR
 → VERIFY_LOCAL
 → fresh LOCAL_REVIEW
 → LOCAL_PASS
-→ LOW_REVIEW_1
+→ EXTERNAL_REVIEW_L1
 ```
 
-修正でexact targetが変わったため、旧targetに対するLocal Review / LOW_REVIEW_1 / LOW_FINAL_REVIEW / HIGH_REVIEW_1 / HIGH_FINAL_REVIEWのPASSは全てstaleである。新targetは必ず低レベルAPIの1回目レビューから取り直す。
+修正でexact targetが変わったため、旧HEADに対するL1..LnのPASSは全てstaleである。新HEADはLevel 1から取り直す。
 
 target identityが変化せず、provider resultの再取得やinvalid finding除外だけを行った場合は、同じLevelのrequest identityをreconcileできる。
 
