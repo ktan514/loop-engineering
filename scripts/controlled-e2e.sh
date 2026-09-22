@@ -406,6 +406,14 @@ case "$MODE" in
     ;;
 esac
 
+DURABLE_AUDIT="$(
+  pipenv run python -m loop_engineering.controlled_e2e_audit     --config "$CONFIG"
+)"
+printf '%s\n' "$DURABLE_AUDIT"
+printf '%s' "$DURABLE_AUDIT" | grep -q '"status": "PASS"' || {
+  die "PostgreSQL durable E2E auditがPASSしませんでした"
+}
+
 GOAL_COUNT="$(
   gh issue list --repo "$FULL" --state all --limit 1000 --json body \
     --jq '[.[] | select(.body | contains("<!-- loop-engineering-goal:"))] | length'
