@@ -165,6 +165,14 @@ class V2AutonomousTransitionExecutor:
                 if not ci_findings:
                     return _intervention("CI_REPAIR_FINDINGS_UNAVAILABLE")
                 approved_findings = ci_findings
+            elif (
+                work.human_verification_required
+                and work.human_verification_state is EvidenceState.FAIL
+            ):
+                human_findings = self._human_repair_findings(registration, work)
+                if not human_findings:
+                    return _intervention("HUMAN_REPAIR_FINDINGS_UNAVAILABLE")
+                approved_findings = human_findings
             else:
                 external = self.external_review_state.get(work.work_identity)
                 if (
@@ -466,6 +474,39 @@ class V2AutonomousTransitionExecutor:
         return _progressed("EXTERNAL_PASS_CONFIRMED")
 
 
+    def _human_repair_findings(
+        self,
+        registration: ProductDevelopmentRegistration,
+        work: V2WorkObservation,
+    ) -> tuple[ImplementerFinding, ...]:
+        if work.human_verification_identity is None:
+            return ()
+        path = self._first_changed_path(registration, work)
+        if path is None:
+            return ()
+        identity = "human-finding:" + hashlib.sha256(
+            (
+                f"{work.work_identity}|{work.exact_head_sha}|"
+                f"{work.human_verification_identity}"
+            ).encode()
+        ).hexdigest()
+        return (
+            ImplementerFinding(
+                finding_identity=identity,
+                severity="BLOCKING",
+                path=path,
+                location=f"Human:{work.human_verification_identity}",
+                problem="required Human VerificationがFAILした",
+                basis="Production Human Verification policy",
+                evidence=work.human_verification_identity,
+                impact="Integration Gateへ進めない",
+                suggested_fix=(
+                    "current exact HEADのHuman Verification failureを確認し、"
+                    "同一lineageで必要な修正を行う"
+                ),
+            ),
+        )
+
     def _ci_repair_findings(
         self,
         registration: ProductDevelopmentRegistration,
@@ -473,31 +514,9 @@ class V2AutonomousTransitionExecutor:
     ) -> tuple[ImplementerFinding, ...]:
         if work.ci_identity is None:
             return ()
-        pr_number = _pr_number(work.active_lineage_identity)
-        if pr_number is None:
+        path = self._first_changed_path(registration, work)
+        if path is None:
             return ()
-        changed = self._run(
-            (
-                "gh",
-                "pr",
-                "diff",
-                str(pr_number),
-                "--repo",
-                registration.repository_identity,
-                "--name-only",
-            ),
-            registration.workspace_canonical_path,
-        )
-        if not changed.succeeded:
-            return ()
-        paths = tuple(
-            line.strip()
-            for line in changed.output.splitlines()
-            if line.strip() and _path_in_scope(line.strip(), self.scope_paths)
-        )
-        if not paths:
-            return ()
-        path = paths[0]
         identity = "ci-finding:" + hashlib.sha256(
             f"{work.work_identity}|{work.exact_head_sha}|{work.ci_identity}".encode()
         ).hexdigest()
@@ -542,6 +561,37 @@ class V2AutonomousTransitionExecutor:
             self._git_output(root, ("rev-parse", "HEAD")) == exact_head
             and self._git_output(root, ("branch", "--show-current")) == branch
             and self._git_output(root, ("status", "--porcelain")) == ""
+        )
+
+    def _first_changed_path(
+        self,
+        registration: ProductDevelopmentRegistration,
+        work: V2WorkObservation,
+    ) -> str | None:
+        pr_number = _pr_number(work.active_lineage_identity)
+        if pr_number is None:
+            return None
+        changed = self._run(
+            (
+                "gh",
+                "pr",
+                "diff",
+                str(pr_number),
+                "--repo",
+                registration.repository_identity,
+                "--name-only",
+            ),
+            registration.workspace_canonical_path,
+        )
+        if not changed.succeeded:
+            return None
+        return next(
+            (
+                line.strip()
+                for line in changed.output.splitlines()
+                if line.strip() and _path_in_scope(line.strip(), self.scope_paths)
+            ),
+            None,
         )
 
     def _prepare_workspace(
