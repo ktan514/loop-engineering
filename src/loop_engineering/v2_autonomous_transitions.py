@@ -11,8 +11,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
-from .v2_autonomous_runner import TransitionExecutionResult, TransitionExecutionStatus
 from .config import ReviewLevelConfig
+from .v2_autonomous_runner import TransitionExecutionResult, TransitionExecutionStatus
 from .v2_development_lineage import (
     GitHubDevelopmentLineageEffects,
     LineageIdentity,
@@ -38,9 +38,9 @@ from .v2_local_quality import (
     LocalQualityContext,
     LocalQualityCoordinator,
     LocalQualityStage,
+    LocalQualityState,
     LocalQualityStatus,
     LocalQualityTarget,
-    LocalQualityState,
     VerificationCommandDescriptor,
     clean_workspace_change_identity,
 )

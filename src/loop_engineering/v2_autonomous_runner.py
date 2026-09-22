@@ -17,17 +17,17 @@ from .v2_autonomous_runtime import (
     runtime_identity,
 )
 from .v2_external_review import ExternalReviewState
-from .v2_local_quality import (
-    LocalQualityStage,
-    LocalQualityState,
-    clean_workspace_change_identity,
-)
 from .v2_goal_planning import (
     BootstrapResult,
     PlannedWork,
     PlanningProjectionPort,
     ProductDevelopmentRegistration,
     V2GoalBootstrapService,
+)
+from .v2_local_quality import (
+    LocalQualityStage,
+    LocalQualityState,
+    clean_workspace_change_identity,
 )
 from .v2_supervisor import (
     EvidenceState,
