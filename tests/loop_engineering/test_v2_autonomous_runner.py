@@ -96,7 +96,16 @@ class MemoryRuntime(PostgreSQLAutonomousRuntimeStore):
         self.saved_plan = result
 
     def dispatch(self, item: AutonomousDispatch) -> bool:
-        self.dispatches.setdefault(item.schedule_key, item)
+        current = self.dispatches.get(item.schedule_key)
+        if current is None:
+            self.dispatches[item.schedule_key] = item
+        elif (
+            current.status in {"WAITING", "FAILED"}
+            and current.runtime_identity == item.runtime_identity
+            and current.work_identity == item.work_identity
+            and current.transition == item.transition
+        ):
+            self.dispatches[item.schedule_key] = item
         return self.dispatches[item.schedule_key] == item
 
     def update_dispatch(self, schedule_key: str, status: str, detail: str) -> None:

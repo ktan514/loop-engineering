@@ -148,7 +148,12 @@ class PostgreSQLAutonomousRuntimeStore:
             f"{_literal(item.schedule_key)}, {_literal(item.runtime_identity)}, "
             f"{_literal(item.work_identity)}, {_literal(item.transition)}, "
             f"{_literal(item.status)}, {_literal(item.detail)}) "
-            "ON CONFLICT (schedule_key) DO NOTHING"
+            "ON CONFLICT (schedule_key) DO UPDATE SET "
+            "status = EXCLUDED.status, detail = EXCLUDED.detail, updated_at = now() "
+            "WHERE loop_autonomous_dispatches.status IN ('WAITING', 'FAILED') "
+            "AND loop_autonomous_dispatches.runtime_identity = EXCLUDED.runtime_identity "
+            "AND loop_autonomous_dispatches.work_identity = EXCLUDED.work_identity "
+            "AND loop_autonomous_dispatches.transition = EXCLUDED.transition"
         )
         found = self.dispatch_record(item.schedule_key)
         return found == item
