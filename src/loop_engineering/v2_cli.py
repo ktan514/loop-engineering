@@ -40,6 +40,22 @@ class V2CliComponents:
 def add_v2_arguments(parser: argparse.ArgumentParser) -> None:
     """V2専用の明示CLI引数を追加する。"""
     parser.add_argument(
+        "--v2-autonomous",
+        action="store_true",
+        help="GoalからWorkを生成し、設計・実装・品質Gate・統合を自動継続する。",
+    )
+    parser.add_argument(
+        "--v2-autonomous-once",
+        action="store_true",
+        help="自律Runnerをboundedに1回だけ実行し、WAITINGでも終了する。",
+    )
+    parser.add_argument(
+        "--v2-max-iterations",
+        type=int,
+        default=100,
+        help="自律Runner 1 roundの最大iteration数。",
+    )
+    parser.add_argument(
         "--migrate-v2-work-state",
         type=int,
         metavar="ISSUE_NUMBER",
@@ -96,6 +112,8 @@ def add_v2_arguments(parser: argparse.ArgumentParser) -> None:
 def v2_requested(arguments: argparse.Namespace) -> bool:
     return any(
         (
+            arguments.v2_autonomous,
+            arguments.v2_autonomous_once,
             arguments.migrate_v2_work_state is not None,
             arguments.issue_v2_packet is not None,
             arguments.v2_once is not None,
@@ -118,11 +136,12 @@ def run_v2_command(
     if not v2_requested(arguments):
         return None
     selected = sum(
-        value is not None
-        for value in (
-            arguments.migrate_v2_work_state,
-            arguments.issue_v2_packet,
-            arguments.v2_once,
+        (
+            bool(arguments.v2_autonomous),
+            bool(arguments.v2_autonomous_once),
+            arguments.migrate_v2_work_state is not None,
+            arguments.issue_v2_packet is not None,
+            arguments.v2_once is not None,
         )
     )
     if selected != 1:
@@ -139,6 +158,21 @@ def run_v2_command(
         return _print_blocked("V2_DATABASE_UNAVAILABLE")
     if not capabilities.migration:
         return _print_blocked("V2_SCHEMA_MIGRATION_REQUIRED")
+
+    if arguments.v2_autonomous or arguments.v2_autonomous_once:
+        if _packet_arguments_present(arguments):
+            return _print_blocked("V2_PACKET_ARGUMENT_WITH_AUTONOMOUS")
+        if arguments.v2_max_iterations < 1 or arguments.v2_max_iterations > 1000:
+            return _print_blocked("V2_AUTONOMOUS_ITERATION_LIMIT_INVALID")
+        from .v2_autonomous_cli import run_autonomous
+
+        return run_autonomous(
+            settings=settings,
+            environment=environment,
+            database=components.database,
+            max_iterations=arguments.v2_max_iterations,
+            continuous=bool(arguments.v2_autonomous),
+        )
 
     if arguments.migrate_v2_work_state is not None:
         if _packet_arguments_present(arguments):
