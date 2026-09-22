@@ -47,7 +47,13 @@ from .v2_local_quality import (
     clean_workspace_change_identity,
 )
 from .v2_supervisor import EvidenceState, V2SupervisorDecision, V2Transition, V2WorkObservation
-from .work_state import EffectAttempt, RecoveredWork, WorkCheckpoint, WorkRecord
+from .work_state import (
+    EffectAttempt,
+    RecoveredWork,
+    WorkCheckpoint,
+    WorkRecord,
+    WorkTaskPacket,
+)
 
 _SHA_RE = re.compile(r"[0-9a-f]{40}")
 _PR_RE = re.compile(r"pr:(\d+)")
@@ -90,6 +96,8 @@ class AutonomousWorkStatePort(Protocol):
     def upsert_work(self, record: WorkRecord) -> None: ...
 
     def record_checkpoint(self, checkpoint: WorkCheckpoint) -> None: ...
+
+    def record_task_packet(self, packet: WorkTaskPacket) -> None: ...
 
     def record_effect_intent(self, attempt: EffectAttempt) -> bool: ...
 
@@ -259,6 +267,28 @@ class V2AutonomousTransitionExecutor:
         pull_request = published.pull_request
         if pull_request is None:
             return _intervention("PUBLISHED_PR_IDENTITY_MISSING")
+
+        canonical_design_identities = work.canonical_design_identities
+        if decision.transition is V2Transition.DESIGN:
+            resolved_design = self._canonical_design_identities(
+                registration.workspace_canonical_path,
+                planned.canonical_design_targets,
+            )
+            if not resolved_design:
+                return _intervention("CANONICAL_DESIGN_IDENTITY_UNAVAILABLE")
+            canonical_design_identities = resolved_design
+
+        self.work_state.record_task_packet(
+            WorkTaskPacket(
+                identity=decision.schedule_key,
+                work_identity=work.work_identity,
+                generation=generation,
+                transition=decision.transition.value,
+                status="COMPLETED",
+                canonical_design_identities=canonical_design_identities,
+                external_target_identities=(f"pr:{pull_request.number}",),
+            )
+        )
         self._advance_work(
             work,
             lifecycle="RUNNING",
@@ -776,6 +806,22 @@ class V2AutonomousTransitionExecutor:
             )
         )
 
+    def _canonical_design_identities(
+        self,
+        root: Path,
+        targets: tuple[str, ...],
+    ) -> tuple[str, ...] | None:
+        context = self._canonical_context(root, targets)
+        if context is None:
+            return None
+        return tuple(
+            "design:"
+            + hashlib.sha256(
+                (reference + "\0" + content).encode("utf-8")
+            ).hexdigest()
+            for reference, content in context
+        )
+
     def _canonical_context(
         self,
         root: Path,
@@ -1220,6 +1266,12 @@ class V2AutonomousTransitionExecutor:
         digest = hashlib.sha256(
             f"{schedule_key}|{lifecycle}|{next_action}".encode()
         ).hexdigest()
+        refreshed = self.work_state.recover(work.work_identity)
+        task_packet_identity = (
+            refreshed.record.latest_task_packet_identity
+            if refreshed is not None
+            else None
+        )
         self.work_state.record_checkpoint(
             WorkCheckpoint(
                 identity=f"autonomous-checkpoint:{digest}",
@@ -1228,6 +1280,7 @@ class V2AutonomousTransitionExecutor:
                 checkpoint_kind="SAFE_POINT",
                 resumable_state=lifecycle,
                 next_action=next_action,
+                task_packet_identity=task_packet_identity,
                 external_target_identities=(active_lineage_identity,)
                 if active_lineage_identity is not None
                 else (),
