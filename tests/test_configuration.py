@@ -69,6 +69,17 @@ def test_settings_load_workspace_models_and_secret_environment_names(tmp_path: P
     assert settings.secrets.reviewer_api_key_env == "MY_REVIEWER_KEY"
 
 
+def test_settings_allow_v2_without_legacy_mission_issue(tmp_path: Path) -> None:
+    config = tmp_path / "loop-engineering.ini"
+    _write_config(config, str(tmp_path / "product"))
+    content = config.read_text(encoding="utf-8").replace("mission_issue = 100\n", "")
+    config.write_text(content, encoding="utf-8")
+
+    settings = LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+
+    assert settings.engine.mission_issue is None
+    assert "LOOP_MISSION_ISSUE" not in settings.runtime_environment({})
+
 def test_runtime_environment_maps_secret_values_without_putting_them_in_config(
     tmp_path: Path,
 ) -> None:
