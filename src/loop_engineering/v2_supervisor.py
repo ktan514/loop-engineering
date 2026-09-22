@@ -48,6 +48,7 @@ class V2WorkObservation:
     priority: str | None
     dependency_states: tuple[str, ...]
     acceptance_digest: str | None
+    selected_transition: str | None = None
     canonical_design_identities: tuple[str, ...] = ()
     active_lineage_identity: str | None = None
     exact_head_sha: str | None = None
@@ -199,6 +200,8 @@ def derive_transition(work: V2WorkObservation) -> V2Transition | None:
         return None
     if not work.canonical_design_identities:
         return V2Transition.DESIGN
+    if work.selected_transition == V2Transition.DESIGN.value:
+        return V2Transition.IMPLEMENT
     if work.exact_head_sha is None:
         return V2Transition.IMPLEMENT
     if work.verification_state is EvidenceState.FAIL:
@@ -241,6 +244,7 @@ def schedule_key(
         "issue_revision": work.issue_revision,
         "issue_state": work.issue_state,
         "lifecycle": work.lifecycle,
+        "selected_transition": work.selected_transition,
         "project_status": work.project_status,
         "priority": work.priority,
         "dependency_states": work.dependency_states,
