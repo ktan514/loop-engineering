@@ -15,8 +15,10 @@ from loop_engineering.v2_autonomous_transitions import (
 )
 from loop_engineering.v2_development_lineage import (
     GitHubDevelopmentLineageEffects,
+    LineageIdentity,
     LineageResult,
     LineageStatus,
+    MaterializedProposal,
     PullRequestIdentity,
     TrustedProposalMaterializer,
 )
@@ -117,7 +119,11 @@ class DesignImplementer(V2ImplementerPort):
 
 
 class FakeLineage:
-    def publish(self, lineage, materialized) -> LineageResult:
+    def publish(
+        self,
+        lineage: LineageIdentity,
+        materialized: MaterializedProposal,
+    ) -> LineageResult:
         return LineageResult(
             LineageStatus.CONFIRMED,
             "LINEAGE_PUBLISHED",
@@ -271,7 +277,7 @@ def test_design_publish_persists_canonical_identity_for_next_implement(
     )
     state = MemoryWorkState(
         WorkRecord(
-            work.identity if hasattr(work, "identity") else work.work_identity,
+            work.work_identity,
             registration.repository_identity,
             2,
             work.issue_revision,
