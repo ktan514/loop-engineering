@@ -355,8 +355,18 @@ def test_waiting_dispatch_is_retryable() -> None:
 
 
 def test_all_completed_works_complete_goal() -> None:
-    completed1 = replace(observation(2), issue_state="CLOSED", lifecycle="COMPLETED")
-    completed2 = replace(observation(3), issue_state="CLOSED", lifecycle="COMPLETED")
+    completed1 = replace(
+        observation(2),
+        issue_state="CLOSED",
+        lifecycle="COMPLETED",
+        project_status="Done",
+    )
+    completed2 = replace(
+        observation(3),
+        issue_state="CLOSED",
+        lifecycle="COMPLETED",
+        project_status="Done",
+    )
     runtime = MemoryRuntime()
     transitions = RecordingTransitions()
     app = application(runtime, MutableQueue((completed1, completed2)), transitions)
@@ -366,6 +376,21 @@ def test_all_completed_works_complete_goal() -> None:
     assert result.status is AutonomousRunStatus.GOAL_COMPLETED
     assert transitions.calls == []
     assert runtime.state is not None and runtime.state.status == "COMPLETED"
+
+
+def test_completed_work_requires_project_done_for_goal_completion() -> None:
+    completed = replace(
+        observation(2),
+        issue_state="CLOSED",
+        lifecycle="COMPLETED",
+        project_status="In progress",
+    )
+    runtime = MemoryRuntime()
+    app = application(runtime, MutableQueue((completed,)), RecordingTransitions())
+
+    result = app.run(registration(), max_iterations=1)
+
+    assert result.status is AutonomousRunStatus.WAITING
 
 
 def test_pending_effect_escalates_only_after_repeated_same_state() -> None:
