@@ -729,6 +729,8 @@ class V2AutonomousTransitionExecutor:
         if not _integration_evidence_valid(work):
             return _intervention("INTEGRATION_EVIDENCE_INVALID")
         assert work.exact_head_sha is not None
+        if not self._exact_head_ci_pass(registration, work.exact_head_sha):
+            return _waiting("INTEGRATION_CI_FRESH_READBACK_PENDING")
         pr_number = _pr_number(work.active_lineage_identity)
         if pr_number is None:
             return _intervention("INTEGRATION_PR_IDENTITY_INVALID")
@@ -808,6 +810,50 @@ class V2AutonomousTransitionExecutor:
             return _failed("MERGE_NO_EFFECT")
         self.work_state.record_effect_outcome(key, "UNCERTAIN")
         return _intervention("MERGE_READBACK_UNPROVEN")
+
+    def _exact_head_ci_pass(
+        self,
+        registration: ProductDevelopmentRegistration,
+        head_sha: str,
+    ) -> bool:
+        result = self._run(
+            (
+                "gh",
+                "api",
+                "repos/"
+                + registration.repository_identity
+                + "/actions/runs?head_sha="
+                + head_sha
+                + "&per_page=100",
+            ),
+            registration.workspace_canonical_path,
+        )
+        if not result.succeeded:
+            return False
+        try:
+            payload = json.loads(result.output)
+        except json.JSONDecodeError:
+            return False
+        if not isinstance(payload, dict):
+            return False
+        raw_runs = payload.get("workflow_runs")
+        if not isinstance(raw_runs, list):
+            return False
+        candidates = [
+            item
+            for item in raw_runs
+            if isinstance(item, dict)
+            and item.get("name") == registration.ci_workflow_name
+            and item.get("head_sha") == head_sha
+            and isinstance(item.get("id"), int)
+        ]
+        if not candidates:
+            return False
+        latest = max(candidates, key=lambda item: int(item["id"]))
+        return (
+            latest.get("status") == "completed"
+            and latest.get("conclusion") == "success"
+        )
 
     def _ensure_pr_ready(
         self,
