@@ -165,7 +165,7 @@ LocalWorkerResult
   - agent_artifact_refs[]
 ```
 
-`effect_requirement`は`MAY_CHANGE` / `MUST_CHANGE` / `MUST_NOT_CHANGE`のいずれかとする。DESIGN / IMPLEMENTは`IMPLEMENTER`、REPAIRは`FIXER`へ写像し、通常の変更工程は`MUST_CHANGE`とする。FIXERはHostがreadback済みの`expected_change_identity`と承認済み`approved_findings`へbindする。Self Reviewerは#101で`SELF_REVIEWER` + `MUST_NOT_CHANGE`として接続する。
+`effect_requirement`は`MAY_CHANGE` / `MUST_CHANGE` / `MUST_NOT_CHANGE`のいずれかとする。DESIGN / IMPLEMENTは`IMPLEMENTER`、REPAIRは`FIXER`へ写像し、通常の変更工程は`MUST_CHANGE`とする。FIXERはHostがreadback済みの`expected_change_identity`と承認済み`approved_findings`へbindする。Self Reviewerは#101で`SELF_REVIEWER` + `MUST_NOT_CHANGE`として接続する。 DESIGNの`scope_paths`は`canonical_design_targets`へ必ず狭め、通常の実装scopeをそのまま渡さない。IMPLEMENT / REPAIRはTaskPacketの変更scopeを使用する。
 
 `role`:
 
