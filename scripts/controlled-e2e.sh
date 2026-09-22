@@ -246,7 +246,6 @@ initial_project_status = $INITIAL_STATUS
 done_project_status = $DONE_STATUS
 project_owner = $OWNER
 project_number = $PROJECT_NUMBER
-mission_issue = 1
 label = loop-engineering-e2e
 authority_refs =
 ci_workflow_name = $CI_WORKFLOW
