@@ -32,6 +32,14 @@ REVIEW_API_BASE="${LOOP_E2E_REVIEW_API_BASE:-https://api.openai.com/v1}"
 POSTGRES_DRIVER="${LOOP_E2E_POSTGRES_DRIVER:-${LOOP_POSTGRES_DRIVER:-host}}"
 POSTGRES_CONTAINER="${LOOP_E2E_POSTGRES_CONTAINER:-${LOOP_POSTGRES_CONTAINER:-}}"
 MODE="${1:-run}"
+if [[ "$MODE" == "run" || "$MODE" == "restart" ]]; then
+  [[ "${LOOP_E2E_SKIP_LOCAL_GATES:-0}" != "1" ]] || {
+    die "正式E2E run/restartではlocal Worker Gateをskipできません"
+  }
+  [[ "${LOOP_E2E_CREATE_HOLD_PR:-1}" == "1" ]] || {
+    die "正式E2E run/restartではhistorical HOLD監査をskipできません"
+  }
+fi
 MIN_LOCAL_SHA="${LOOP_E2E_MIN_LOCAL_LLM_CODER_SHA:-40f14742c6034d909c47c123aa8a661afa724163}"
 
 [[ "$OWNER" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "LOOP_E2E_OWNERが不正です"
@@ -200,8 +208,13 @@ if [[ -z "$HOLD_PR_NUMBER" && "${LOOP_E2E_CREATE_HOLD_PR:-1}" == "1" ]]; then
   git -C "$PRODUCTION" reset --hard origin/main
 fi
 
+git -C "$PRODUCTION" fetch origin main
+git -C "$PRODUCTION" switch main
+git -C "$PRODUCTION" reset --hard origin/main
+git -C "$PRODUCTION" clean -fd -- .
+
 PROJECT_NUMBER="$(
-  gh project list --owner "$OWNER" --format json \
+  gh project list --owner "$OWNER" --limit 1000 --format json \
     --jq ".projects[] | select(.title == \"$PROJECT_TITLE\") | .number" \
     | head -n 1
 )"
