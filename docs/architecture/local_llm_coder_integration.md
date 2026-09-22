@@ -450,3 +450,32 @@ IMPLEMENT / REPAIR
 - required Review LevelをskipしてExternal PASSへ進まない。
 - process/session終了をWork終了とみなさない。
 - Human GateをAIの自己承認へ置換しない。
+
+## 15. GitHub Repository / Project管理
+
+統合後もGit Repositoryは責務単位で分離する。
+
+```text
+ktan514/loop-engineering
+- Orchestrator / Workflow / durable state / integration
+
+ktan514/local-llm-coder
+- OpenCode / local LLM Worker Backend / runtime profile
+```
+
+通常の統合作業では、両RepositoryのIssueをGitHub Project `loop-engineering` / Project #9へ登録し、Project #9を横断ロードマップと依存関係の計画Authorityとして使用する。
+
+したがって基本管理単位は **2 Repository / 1統合Project** とする。
+
+Issueは変更を実装するRepositoryへ作成する。
+
+- `local-llm-coder`自身のmodel profile、runtime生成、Worker API/CLI、OpenCode統合変更は`ktan514/local-llm-coder`へ作成する。
+- Local Quality Loop、External Review Level、Adapter、PostgreSQL resume、Runner、Integration Gateは`ktan514/loop-engineering`へ作成する。
+- Repositoryをまたぐ依存はProject #9のWork graphとして追跡する。
+
+現段階では`local-llm-coder`専用GitHub Projectを追加しない。二つのProjectで同じStatus / Priority / dependencyを二重管理しない。
+
+将来`local-llm-coder`固有の独立ロードマップが大きくなり専用Projectを設ける場合も、Project #9を統合Authorityとして維持し、専用ProjectはBackend内部計画に限定する。統合Workの状態を二つのProjectで別々のAuthorityとして管理しない。
+
+Repository間の結合はsource copy、subdirectory化、submodule化ではなく、versioned Adapter / CLI / structured request-result contractで行う。
+
