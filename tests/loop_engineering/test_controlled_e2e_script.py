@@ -27,3 +27,6 @@ def test_controlled_e2e_does_not_delete_or_force_push() -> None:
     assert "push --force" not in content
     assert ".loop-controlled-e2e" in content
     assert "reset --hard origin/main" in content
+    assert "\\${" not in content
+    assert "historical/hold" in content
+    assert "restart)" in content
