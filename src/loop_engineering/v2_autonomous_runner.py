@@ -16,7 +16,12 @@ from .v2_autonomous_runtime import (
     PostgreSQLAutonomousRuntimeStore,
     runtime_identity,
 )
-from .v2_evidence import EvidenceTarget, V2EvidenceCoordinator, apply_evidence
+from .v2_external_review import ExternalReviewState
+from .v2_local_quality import (
+    LocalQualityStage,
+    LocalQualityState,
+    clean_workspace_change_identity,
+)
 from .v2_goal_planning import (
     BootstrapResult,
     PlannedWork,
@@ -25,6 +30,7 @@ from .v2_goal_planning import (
     V2GoalBootstrapService,
 )
 from .v2_supervisor import (
+    EvidenceState,
     V2Supervisor,
     V2SupervisorDecision,
     V2SupervisorDisposition,
@@ -237,9 +243,24 @@ class GitHubAutonomousLineageObserver:
         return tuple(identities)
 
 
+class LocalQualityStateReader(Protocol):
+    def get(self, work_identity: str) -> LocalQualityState | None: ...
+
+
+class ExternalReviewStateReader(Protocol):
+    def get(self, work_identity: str) -> ExternalReviewState | None: ...
+
+
 class EvidenceEnricher:
-    def __init__(self, evidence: V2EvidenceCoordinator) -> None:
-        self._evidence = evidence
+    """durable Local/External Gateをcurrent PR headへbindしてSupervisorへ投影する。"""
+
+    def __init__(
+        self,
+        local_quality: LocalQualityStateReader,
+        external_review: ExternalReviewStateReader,
+    ) -> None:
+        self._local_quality = local_quality
+        self._external_review = external_review
 
     def enrich(
         self,
@@ -250,21 +271,72 @@ class EvidenceEnricher:
         work = replace(
             snapshot.observation,
             human_verification_required=planned.human_verification_required,
+            human_verification_state=(
+                EvidenceState.NOT_RUN
+                if planned.human_verification_required
+                else EvidenceState.NOT_REQUIRED
+            ),
+            human_verification_identity=None,
         )
         if snapshot.pr_number is None or work.exact_head_sha is None or work.merged:
             return work
-        target = EvidenceTarget(
-            repository=registration.repository_identity,
-            work_identity=work.work_identity,
-            issue_number=work.issue_number,
-            pr_number=snapshot.pr_number,
-            head_sha=work.exact_head_sha,
-            base_branch=registration.trunk_branch,
-            canonical_design_identities=work.canonical_design_identities,
-            acceptance_digest=work.acceptance_digest or "",
+
+        branch = _work_branch(registration.work_branch_template, work.issue_number)
+        change_identity = clean_workspace_change_identity(work.exact_head_sha, branch)
+        local = self._local_quality.get(work.work_identity)
+        local_pass: str | None = None
+        verification_state = EvidenceState.NOT_RUN
+        verification_identity: str | None = None
+        unresolved = work.unresolved_conflict
+
+        if (
+            local is not None
+            and local.target_head_sha == work.exact_head_sha
+            and local.change_identity == change_identity
+        ):
+            if (
+                local.stage is LocalQualityStage.LOCAL_PASS
+                and local.local_pass_identity is not None
+            ):
+                local_pass = local.local_pass_identity
+                verification_state = EvidenceState.PASS
+                verification_identity = local.local_pass_identity
+            elif local.stage is LocalQualityStage.BLOCKED:
+                unresolved = True
+
+        review_state = EvidenceState.NOT_RUN
+        review_identity: str | None = None
+        if local_pass is not None:
+            external = self._external_review.get(work.work_identity)
+            if (
+                external is not None
+                and external.target_head_sha == work.exact_head_sha
+                and external.change_identity == change_identity
+                and external.local_pass_identity == local_pass
+            ):
+                if external.status == "PASS":
+                    review_state = EvidenceState.PASS
+                    review_identity = _external_observed_identity(
+                        work.work_identity,
+                        work.exact_head_sha,
+                        change_identity,
+                        local_pass,
+                        external.completed_evidence,
+                    )
+                elif external.status == "REQUEST_CHANGES":
+                    review_state = EvidenceState.REQUEST_CHANGES
+                    review_identity = external.current_request_key
+                elif external.status in {"BLOCKED", "ESCALATE"}:
+                    unresolved = True
+
+        return replace(
+            work,
+            verification_state=verification_state,
+            verification_identity=verification_identity,
+            review_state=review_state,
+            review_identity=review_identity,
+            unresolved_conflict=unresolved,
         )
-        bundle = self._evidence.observe(target, planned.human_verification_required)
-        return apply_evidence(work, bundle)
 
 
 class AllWorkGoalAcceptance:
@@ -573,6 +645,24 @@ class V2AutonomousRunner:
             lineage = self._lineage.observe(registration, work, planned_work)
             observed.append(self._evidence.enrich(registration, lineage, planned_work))
         return tuple(observed)
+
+
+def _external_observed_identity(
+    work_identity: str,
+    head: str,
+    change_identity: str,
+    local_pass_identity: str,
+    completed_evidence: tuple[str, ...],
+) -> str:
+    payload = {
+        "work": work_identity,
+        "head": head,
+        "change": change_identity,
+        "local_pass": local_pass_identity,
+        "completed": completed_evidence,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return "external-pass-observed:" + hashlib.sha256(encoded.encode()).hexdigest()
 
 
 def _planned_by_issue(bootstrap: BootstrapResult) -> dict[int, PlannedWork]:
