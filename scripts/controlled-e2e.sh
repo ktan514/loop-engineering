@@ -31,6 +31,8 @@ HIGH_REVIEW_MODEL="${LOOP_E2E_HIGH_REVIEW_MODEL:-}"
 REVIEW_API_BASE="${LOOP_E2E_REVIEW_API_BASE:-https://api.openai.com/v1}"
 POSTGRES_DRIVER="${LOOP_E2E_POSTGRES_DRIVER:-${LOOP_POSTGRES_DRIVER:-host}}"
 POSTGRES_CONTAINER="${LOOP_E2E_POSTGRES_CONTAINER:-${LOOP_POSTGRES_CONTAINER:-}}"
+MODE="${1:-run}"
+MIN_LOCAL_SHA="${LOOP_E2E_MIN_LOCAL_LLM_CODER_SHA:-40f14742c6034d909c47c123aa8a661afa724163}"
 
 [[ "$OWNER" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "LOOP_E2E_OWNERが不正です"
 [[ "$NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "LOOP_E2E_NAMEが不正です"
@@ -38,6 +40,12 @@ POSTGRES_CONTAINER="${LOOP_E2E_POSTGRES_CONTAINER:-${LOOP_POSTGRES_CONTAINER:-}}
 [[ -d "$LOCAL_ROOT" ]] || die "local-llm-coder rootがありません: $LOCAL_ROOT"
 [[ -x "$LOCAL_ROOT/scripts/run-worker.sh" ]] || die "local-llm-coder Workerがありません"
 [[ -f "$LOCAL_ROOT/config/local-profiles.json" ]] || die "local-profiles.jsonがありません"
+git -C "$LOCAL_ROOT" cat-file -e "$MIN_LOCAL_SHA^{commit}" 2>/dev/null || {
+  die "local-llm-coder current Worker基準SHAを取得できません: $MIN_LOCAL_SHA"
+}
+git -C "$LOCAL_ROOT" merge-base --is-ancestor "$MIN_LOCAL_SHA" HEAD || {
+  die "local-llm-coder HEADにcurrent Worker #7が含まれていません"
+}
 [[ -n "${LOOP_POSTGRES_DSN:-}" ]] || die "LOOP_POSTGRES_DSNを設定してください"
 [[ -n "${OPENAI_API_KEY:-}" ]] || die "OPENAI_API_KEYを設定してください"
 
@@ -65,6 +73,16 @@ fi
 
 if [[ "$POSTGRES_DRIVER" == "docker" && -z "$POSTGRES_CONTAINER" ]]; then
   die "docker PostgreSQLではLOOP_E2E_POSTGRES_CONTAINERが必要です"
+fi
+
+if [[ "$MODE" != "audit" && "${LOOP_E2E_SKIP_LOCAL_GATES:-0}" != "1" ]]; then
+  (
+    cd "$LOCAL_ROOT"
+    bash tests/worker/run.sh
+    bash tests/opencode-boundaries/run.sh
+    bash tests/worker/live-smoke.sh
+  )
+  echo "LOCAL_LLM_CODER_CURRENT_GATE=PASS"
 fi
 
 RUN_ROOT="${LOOP_E2E_RUN_ROOT:-$HOME/.local/share/loop-engineering/controlled-e2e/$NAME}"
@@ -329,7 +347,6 @@ pipenv run python -m loop_engineering \
 
 export LOOP_MISSION_GOAL_PATH="$GOAL"
 
-MODE="${1:-run}"
 case "$MODE" in
   prepare)
     echo "CONTROLLED_E2E_PREPARED=PASS"
