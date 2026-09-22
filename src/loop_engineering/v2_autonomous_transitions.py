@@ -728,8 +728,21 @@ class V2AutonomousTransitionExecutor:
             self._mark_integrated(work, pr_number, schedule_key)
             return _progressed("PR_ALREADY_MERGED")
         expected = ("OPEN", work.exact_head_sha, registration.trunk_branch)
-        if observed != expected:
+        if observed[:3] != expected:
             return _intervention("INTEGRATION_PR_PRECONDITION_CONFLICT")
+        if observed[3]:
+            ready = self._ensure_pr_ready(
+                registration,
+                work,
+                pr_number,
+                schedule_key,
+                observed,
+            )
+            if ready is not None:
+                return ready
+            observed = self._pr_state(registration, pr_number)
+            if observed is None or observed[:3] != expected or observed[3]:
+                return _intervention("PR_READY_READBACK_UNPROVEN")
 
         key = _effect_key(schedule_key, "MERGE", f"pr:{pr_number}")
         if _pending_effect(self.work_state.recover(work.work_identity), key) == "UNCERTAIN":
@@ -745,6 +758,7 @@ class V2AutonomousTransitionExecutor:
                 ("head", work.exact_head_sha),
                 ("base", registration.trunk_branch),
                 ("state", "OPEN"),
+                ("draft", "false"),
             ),
             expected_effect=(("state", "MERGED"),),
         )
@@ -783,6 +797,74 @@ class V2AutonomousTransitionExecutor:
             return _failed("MERGE_NO_EFFECT")
         self.work_state.record_effect_outcome(key, "UNCERTAIN")
         return _intervention("MERGE_READBACK_UNPROVEN")
+
+    def _ensure_pr_ready(
+        self,
+        registration: ProductDevelopmentRegistration,
+        work: V2WorkObservation,
+        pr_number: int,
+        schedule_key: str,
+        observed: tuple[str, str, str, bool],
+    ) -> TransitionExecutionResult | None:
+        if not observed[3]:
+            return None
+        key = _effect_key(schedule_key, "READY", f"pr:{pr_number}")
+        pending = _pending_effect(self.work_state.recover(work.work_identity), key)
+        if pending == "UNCERTAIN":
+            fresh = self._pr_state(registration, pr_number)
+            if fresh is not None and fresh[:3] == observed[:3] and not fresh[3]:
+                self.work_state.record_effect_outcome(key, "CONFIRMED")
+                return None
+            return _intervention("PR_READY_EFFECT_UNCERTAIN")
+
+        attempt = EffectAttempt(
+            idempotency_key=key,
+            work_identity=work.work_identity,
+            kind="READY",
+            target_identity=f"pr:{pr_number}",
+            status="INTENT_RECORDED",
+            packet_generation=_generation(schedule_key),
+            expected_preconditions=(
+                ("head", observed[1]),
+                ("base", observed[2]),
+                ("state", observed[0]),
+                ("draft", "true"),
+            ),
+            expected_effect=(("draft", "false"),),
+        )
+        if not self.work_state.record_effect_intent(attempt):
+            fresh = self._pr_state(registration, pr_number)
+            if fresh is not None and fresh[:3] == observed[:3] and not fresh[3]:
+                return None
+            return _intervention("PR_READY_EFFECT_STATE_CONFLICT")
+
+        fresh_before = self._pr_state(registration, pr_number)
+        if fresh_before != observed:
+            self.work_state.record_effect_outcome(key, "NO_EFFECT")
+            if fresh_before is not None and fresh_before[:3] == observed[:3] and not fresh_before[3]:
+                return None
+            return _intervention("PR_READY_PRECONDITION_CHANGED")
+
+        sent = self._run(
+            (
+                "gh",
+                "pr",
+                "ready",
+                str(pr_number),
+                "--repo",
+                registration.repository_identity,
+            ),
+            registration.workspace_canonical_path,
+        )
+        fresh = self._pr_state(registration, pr_number)
+        if fresh is not None and fresh[:3] == observed[:3] and not fresh[3]:
+            self.work_state.record_effect_outcome(key, "CONFIRMED")
+            return None
+        if sent.succeeded and fresh == observed:
+            self.work_state.record_effect_outcome(key, "NO_EFFECT")
+            return _failed("PR_READY_NO_EFFECT")
+        self.work_state.record_effect_outcome(key, "UNCERTAIN")
+        return _intervention("PR_READY_READBACK_UNPROVEN")
 
     def _complete_work(
         self,
@@ -1052,7 +1134,7 @@ class V2AutonomousTransitionExecutor:
         self,
         registration: ProductDevelopmentRegistration,
         pr_number: int,
-    ) -> tuple[str, str, str] | None:
+    ) -> tuple[str, str, str, bool] | None:
         result = self._run(
             (
                 "gh",
@@ -1062,7 +1144,7 @@ class V2AutonomousTransitionExecutor:
                 "--repo",
                 registration.repository_identity,
                 "--json",
-                "number,state,headRefOid,baseRefName",
+                "number,state,headRefOid,baseRefName,isDraft",
             ),
             registration.workspace_canonical_path,
         )
@@ -1074,9 +1156,15 @@ class V2AutonomousTransitionExecutor:
         state = payload.get("state")
         head = payload.get("headRefOid")
         base = payload.get("baseRefName")
-        if not isinstance(state, str) or not isinstance(head, str) or not isinstance(base, str):
+        draft = payload.get("isDraft")
+        if (
+            not isinstance(state, str)
+            or not isinstance(head, str)
+            or not isinstance(base, str)
+            or not isinstance(draft, bool)
+        ):
             return None
-        return state, head, base
+        return state, head, base, draft
 
     def _issue_state(
         self,
