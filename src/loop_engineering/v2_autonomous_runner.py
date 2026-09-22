@@ -399,7 +399,7 @@ class AllWorkGoalAcceptance:
         return bool(works) and all(
             work.lifecycle == "COMPLETED"
             and work.issue_state == "CLOSED"
-            and work.project_status == "Done"
+            and work.project_status == work.done_project_status
             and not work.unresolved_conflict
             for work in works
         )
