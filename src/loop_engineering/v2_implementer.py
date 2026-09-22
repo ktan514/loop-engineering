@@ -463,6 +463,20 @@ def _instruction(packet: DevelopmentTaskPacket) -> str:
     non_goals = "\n".join(f"- {item}" for item in packet.non_goals) or "- なし"
     safety = "\n".join(f"- {item}" for item in packet.safety_constraints) or "- 追加なし"
     design_targets = ", ".join(packet.canonical_design_targets) or "なし"
+    findings = (
+        "\n".join(
+            "- "
+            + item.finding_identity
+            + ": "
+            + item.path
+            + " "
+            + item.problem
+            + " / 修正案: "
+            + item.suggested_fix
+            for item in packet.approved_findings
+        )
+        or "- なし"
+    )
     return (
         f"Loop Engineeringの{packet.transition.value}遷移を1回だけ実行してください。\n"
         f"Work: {packet.work_identity}\n"
@@ -476,6 +490,9 @@ def _instruction(packet: DevelopmentTaskPacket) -> str:
         f"{non_goals}\n"
         "追加安全条件:\n"
         f"{safety}\n"
+        "承認済み修正指摘:\n"
+        f"{findings}\n"
+        "REPAIRでは承認済み修正指摘だけを修正対象として扱ってください。\n"
         "設計→実装の順序を守り、人間向け文章は日本語で記述してください。\n"
         "Git branch作成・切替、commit、push、rebase、force push、PR作成・更新、merge、"
         "GitHub Issue/Projectへの書込みを行わないでください。\n"
