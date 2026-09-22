@@ -76,11 +76,28 @@ Loop Engineering CoreはOpenCode、Ollama、特定モデル名、OpenAIのSDK型
 
 `local-llm-coder`はWork選択、Mission継続、外部Review Level順序、merge可否、Goal完了を判断しない。
 
+ただし、Repository access capabilityとしては`loop-engineering`と`local-llm-coder`を一方向Read-only関係にはしない。正式なTaskPacket / Work scopeで対象Repositoryが指定された場合、両Repositoryはいずれも開発対象としてRead / Write可能である。
+
 ### 2.3 Product Workspaceが所有するもの
 
 Product WorkspaceはProduct code、Product canonical、Product固有設定・試験・実行結果を所有する。
 
 Loop Engineeringと`local-llm-coder`はProduct固有の意味Authorityを複製しない。
+
+### 2.4 Repository間のRead / Write
+
+`loop-engineering`と`local-llm-coder`は、どちらも信頼済み開発RepositoryとしてRead / Write可能とする。
+
+意味するところは次の通り。
+
+- Loop Engineeringは、`local-llm-coder`を現在Workの対象Repositoryとして選択した場合、そのRepositoryの設計・code・test・branch・PRを通常のWrite Gate / lineage規則に従って変更できる。
+- `local-llm-coder`は、Loop Engineeringから渡されたTaskPacketで`loop-engineering`がActive Product / target Workspaceとして指定された場合、Implementer / FixerとしてそのRepositoryをRead / Writeできる。
+- Self Reviewerは対象Repositoryがどちらであってもread-only roleを維持する。
+- どちらのRepositoryも、現在TaskPacketのtarget外である相手Repositoryを暗黙に変更しない。
+- Repository間Writeはbranch / PR / exact target / readback / Write Gateを迂回しない。
+- 「相互にRead / Write可能」と「相互Repositoryを常時同時に変更する」は別である。1つのtransitionではtarget Repositoryとscopeを明示する。
+
+したがって境界は「Repository AはRepository Bへ書けない」ではなく、**現在のWork / TaskPacketで選択されたtarget Repositoryだけを安全にRead / Writeする**ことである。
 
 ## 3. local-llm-coder Backend契約
 
@@ -472,6 +489,7 @@ Issueは変更を実装するRepositoryへ作成する。
 - `local-llm-coder`自身のmodel profile、runtime生成、Worker API/CLI、OpenCode統合変更は`ktan514/local-llm-coder`へ作成する。
 - Local Quality Loop、External Review Level、Adapter、PostgreSQL resume、Runner、Integration Gateは`ktan514/loop-engineering`へ作成する。
 - Repositoryをまたぐ依存はProject #9のWork graphとして追跡する。
+- 両Repositoryは必要に応じて互いを開発対象Repositoryとして扱えるが、変更は必ず対象Repository自身のbranch / PR / exact-head Gateで管理する。
 
 現段階では`local-llm-coder`専用GitHub Projectを追加しない。二つのProjectで同じStatus / Priority / dependencyを二重管理しない。
 
