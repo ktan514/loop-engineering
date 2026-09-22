@@ -276,3 +276,26 @@ Exit:
 - Issue commentからcurrent Work / PR / HEADを推測する。
 - 旧actual-hostをV2 Runnerの代わりに呼ぶ。
 - controlled E2E未実施のまま「製造完了」と報告する。
+
+## 14. #98による追加設計Gate
+
+Work: #98
+Parent: #81
+Related: #85 / #87 / #88
+
+#85 / #87で完成したImplementer / exact-head review / repair契約は維持する。一方、Local LLM backend、自動Self Review、Completion Contract、段階External Review、model profileは#82〜#87の当初製造範囲では一意に実装されていない。
+
+#88のRunner完成前に#98で次を正本化する。
+
+1. `local-llm-coder`を交換可能Worker Adapterとして接続する境界
+2. Implement → Verify → Local Review → Repairの自動Local Quality Loop
+3. `LOCAL_PASS` evidence
+4. Worker Completion Contractと途中停止resume
+5. local model provider / model / endpointのprofile設定
+6. External Review Level 1..N
+7. finding修正後のexact-head review再取得
+8. #88 Runner / recoveryへの追加状態
+
+#98は設計Workであり、実装Issueは設計採用後にlive状態を確認して登録する。
+
+#88のCompletion Gateには、少なくとも「人間がAgent modeを手動切替せずLocal Quality Loopを完走できる」「required External Review Levelをexact targetで完走できる」「process/session中断後に未完stageへ復元できる」を追加する。

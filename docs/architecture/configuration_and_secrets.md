@@ -166,3 +166,47 @@ CLI overrideは設定ファイルの選択等の明示的な一時変更に限�
 - 設定と実Workspace/Repository identityが不一致ならfail-closed
 - Product固有値をCoreへハードコードしない
 - model/provider変更をCore state machineの変更理由にしない
+
+## 10. Worker ProfileとReview Level設定
+
+Issue #98以降、モデル設定Authorityを二層へ分離する。
+
+### 10.1 Loop Engineering側
+
+Loop Engineeringの設定は「工程でどのBackend / Profileを使うか」と外部Review Levelを所有する。
+
+概念例:
+
+```ini
+[models]
+implementer_provider = local-llm-coder
+implementer_profile = local-main
+local_reviewer_provider = local-llm-coder
+local_reviewer_profile = local-main
+
+[review.level.1]
+provider = openai
+model = <level-1-model>
+required = true
+
+[review.level.2]
+provider = openai
+model = <level-2-model>
+required = true
+```
+
+既存の`implementer_model` / `reviewer_model`単一設定は移行期間の互換入力とし、新しいprofile / level設定へ正規化する。Core state machineへmodel名を埋め込まない。
+
+### 10.2 local-llm-coder側
+
+`local-llm-coder`は選択されたlocal profileから実provider / model / endpointを解決する。
+
+実環境profileはGit管理外設定とし、Repositoryへはexample/schemaだけを保存する。
+
+現在の固定Ollama modelを含む`config/opencode.json`は将来runtime templateへ変更し、selected profileからmanaged runtime configを生成する。
+
+model / endpoint変更だけでLoop EngineeringのWork/Review状態機械を変更しない。
+
+API key等の秘密値は既存どおり環境変数参照だけを設定へ保存し、実値をprofile、TaskPacket、Checkpoint、Worker resultへ含めない。
+
+詳細は `docs/architecture/local_llm_coder_integration.md` を正本とする。

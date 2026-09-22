@@ -401,3 +401,25 @@ Coreはerror kind + scope + retry semanticsからRun dispositionを判断する�
 - exact target identityをCI/Review/Human Verification/Integrationで維持
 - V2 production recoveryはtransactional durable Operational Stateを必須とする
 - create effectを再起動時に盲目的再送しない
+
+## 21. local-llm-coder Adapter
+
+Issue #98では`local-llm-coder`をImplementerPort / local reviewer境界へ接続する交換可能Adapterとして扱う。
+
+`local-llm-coder`はOrchestratorではない。Work選択、lineage、quality stage、Review Level、resume、integrationはLoop Engineeringが所有する。
+
+Adapterは最低限、次のtyped境界を提供する。
+
+```text
+execute(LocalWorkerRequest) -> LocalWorkerResult
+```
+
+RequestはTaskPacket identity、role、exact target、scope、acceptance、model profileを持つ。Resultはtarget echo、terminal status、Completion Contract、finding、変更path、検証evidence、diagnosticを機械可読形式で返す。
+
+roleはImplementer / Self Reviewer / Fixerへ対応するが、CoreはOpenCode agent名を直接扱わない。
+
+Local Self Reviewerはread-only capabilityを維持し、External Reviewerと同様にProduct write authorityを持たない。
+
+Codex Implementer Adapterは既存Adapterとして維持し、`local-llm-coder`の追加によって無効化しない。Provider選択はProfile/Policyによって行う。
+
+詳細は `docs/architecture/local_llm_coder_integration.md` を正本とする。
