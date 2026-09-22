@@ -165,6 +165,43 @@ class ModelConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ReviewLevelConfig:
+    """External Review Levelの非秘密policy。"""
+
+    level: int
+    provider: str
+    model: str
+    api_base: str
+    credential_env: str
+    required: bool = True
+    timeout_seconds: int = 1200
+    context_policy: str = "default"
+    escalation_policy: str = "BLOCK"
+    passes_required: int = 1
+
+    def __post_init__(self) -> None:
+        if self.level < 1:
+            raise ValueError("review levelは1以上で指定してください")
+        for name, value in (
+            ("provider", self.provider),
+            ("model", self.model),
+            ("api_base", self.api_base),
+            ("context_policy", self.context_policy),
+        ):
+            if not value.strip():
+                raise ValueError(f"review level {name}を空文字にはできません")
+        _validate_env_name("review level credential_env", self.credential_env)
+        if self.timeout_seconds < 1 or self.timeout_seconds > 7200:
+            raise ValueError("review level timeout_secondsは1..7200で指定してください")
+        if self.passes_required < 1 or self.passes_required > 8:
+            raise ValueError("review level passes_requiredは1..8で指定してください")
+        if self.escalation_policy not in {"NEXT_LEVEL", "HUMAN", "BLOCK"}:
+            raise ValueError(
+                "review level escalation_policyはNEXT_LEVEL/HUMAN/BLOCKで指定してください"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class LocalLlmCoderConfig:
     """local-llm-coder Worker Backendの非秘密設定。"""
 
@@ -219,6 +256,7 @@ class LoopEngineeringSettings:
     models: ModelConfig
     secrets: SecretReferenceConfig
     local_llm_coder: LocalLlmCoderConfig | None = None
+    review_levels: tuple[ReviewLevelConfig, ...] = ()
 
     @classmethod
     def load(
@@ -298,14 +336,20 @@ class LoopEngineeringSettings:
             implementer_profile=models.get("implementer_profile", "").strip() or None,
         )
         local_llm_coder = _local_llm_coder_from_parser(parser, model_config)
+        reviewer_api_key_env = (
+            models.get("reviewer_api_key_env", "OPENAI_API_KEY").strip()
+            or "OPENAI_API_KEY"
+        )
+        review_levels = _review_levels_from_parser(
+            parser,
+            model_config,
+            reviewer_api_key_env,
+        )
         secrets = SecretReferenceConfig(
             github_token_env=(
                 credentials.get("github_token_env", "GH_TOKEN").strip() or "GH_TOKEN"
             ),
-            reviewer_api_key_env=(
-                models.get("reviewer_api_key_env", "OPENAI_API_KEY").strip()
-                or "OPENAI_API_KEY"
-            ),
+            reviewer_api_key_env=reviewer_api_key_env,
             operational_store_dsn_env=(
                 operational_store.get("dsn_env", "LOOP_POSTGRES_DSN").strip()
                 or "LOOP_POSTGRES_DSN"
@@ -323,6 +367,7 @@ class LoopEngineeringSettings:
             models=model_config,
             secrets=secrets,
             local_llm_coder=local_llm_coder,
+            review_levels=review_levels,
         )
 
     def runtime_environment(
@@ -489,6 +534,80 @@ def _configured_path(platform_root: Path, environment: Mapping[str, str]) -> Pat
     return platform_root / "config" / "loop-engineering.ini"
 
 
+def _review_levels_from_parser(
+    parser: ConfigParser,
+    models: ModelConfig,
+    default_credential_env: str,
+) -> tuple[ReviewLevelConfig, ...]:
+    sections: list[tuple[int, SectionProxy]] = []
+    for name in parser.sections():
+        matched = re.fullmatch(r"review\.level\.(\d+)", name)
+        if matched is None:
+            continue
+        level = int(matched.group(1))
+        if level < 1:
+            raise ValueError("review levelは1以上で指定してください")
+        sections.append((level, parser[name]))
+
+    if not sections:
+        return (
+            ReviewLevelConfig(
+                level=1,
+                provider=models.reviewer_provider,
+                model=models.reviewer_model,
+                api_base=models.reviewer_api_base,
+                credential_env=default_credential_env,
+            ),
+        )
+
+    sections.sort(key=lambda item: item[0])
+    result: list[ReviewLevelConfig] = []
+    for level, section in sections:
+        try:
+            required = section.getboolean("required", fallback=True)
+        except ValueError as error:
+            raise ValueError(
+                f"{section.name}.requiredはtrue/falseで指定してください"
+            ) from error
+        result.append(
+            ReviewLevelConfig(
+                level=level,
+                provider=section.get("provider", models.reviewer_provider).strip()
+                or models.reviewer_provider,
+                model=section.get("model", models.reviewer_model).strip()
+                or models.reviewer_model,
+                api_base=section.get("api_base", models.reviewer_api_base).strip()
+                or models.reviewer_api_base,
+                credential_env=(
+                    section.get("credential_env", default_credential_env).strip()
+                    or default_credential_env
+                ),
+                required=required,
+                timeout_seconds=_bounded_int_section(
+                    section,
+                    "timeout_seconds",
+                    default=1200,
+                    minimum=1,
+                    maximum=7200,
+                ),
+                context_policy=section.get("context_policy", "default").strip()
+                or "default",
+                escalation_policy=(
+                    section.get("escalation_policy", "BLOCK").strip().upper()
+                    or "BLOCK"
+                ),
+                passes_required=_bounded_int_section(
+                    section,
+                    "passes_required",
+                    default=1,
+                    minimum=1,
+                    maximum=8,
+                ),
+            )
+        )
+    return tuple(result)
+
+
 def _local_llm_coder_from_parser(
     parser: ConfigParser,
     models: ModelConfig,
@@ -550,6 +669,28 @@ def _optional_int_section(section: SectionProxy, name: str) -> int | None:
         raise ValueError(f"{section.name}.{name}は整数で指定してください") from error
     if value < 1:
         raise ValueError(f"{section.name}.{name}は1以上で指定してください")
+    return value
+
+
+def _bounded_int_section(
+    section: SectionProxy,
+    name: str,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    raw = section.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as error:
+        raise ValueError(f"{section.name}.{name}は整数で指定してください") from error
+    if value < minimum or value > maximum:
+        raise ValueError(
+            f"{section.name}.{name}は{minimum}..{maximum}で指定してください"
+        )
     return value
 
 
