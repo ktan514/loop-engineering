@@ -847,7 +847,11 @@ class V2AutonomousTransitionExecutor:
         fresh_before = self._pr_state(registration, pr_number)
         if fresh_before != observed:
             self.work_state.record_effect_outcome(key, "NO_EFFECT")
-            if fresh_before is not None and fresh_before[:3] == observed[:3] and not fresh_before[3]:
+            if (
+                fresh_before is not None
+                and fresh_before[:3] == observed[:3]
+                and not fresh_before[3]
+            ):
                 return None
             return _intervention("PR_READY_PRECONDITION_CHANGED")
 
