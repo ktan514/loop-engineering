@@ -65,7 +65,10 @@ class StrictGhMissionPort(GhMissionPort):
         self._merge_conflict_target: tuple[int, int, str] | None = None
 
     def _checkpoint_candidate(self) -> tuple[int, int | None, str | None, int] | None:
-        comments = self._issue_comments(self.config.mission_issue)
+        mission_issue = self.config.mission_issue
+        if mission_issue is None:
+            raise RuntimeError("LEGACY_MISSION_ISSUE_REQUIRED")
+        comments = self._issue_comments(mission_issue)
         latest_checkpoint: dict[str, object] | None = None
         for comment in reversed(comments):
             body = comment.get("body")
