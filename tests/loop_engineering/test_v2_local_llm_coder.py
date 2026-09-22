@@ -205,7 +205,12 @@ def test_local_backend_design_and_implement(
     assert result.status is ImplementerStatus.SUCCESS
     assert result.workspace_effect is not None
     assert result.proposal is None
-    assert result.workspace_effect.changed_paths == ("src/app.py",)
+    expected_changed_path = (
+        "docs/design.md"
+        if transition is ImplementerTransition.DESIGN
+        else "src/app.py"
+    )
+    assert result.workspace_effect.changed_paths == (expected_changed_path,)
     assert runner.request is not None
     assert runner.request["role"] == expected_role
     assert runner.request["transition"] == transition.value
