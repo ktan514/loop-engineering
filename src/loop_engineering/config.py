@@ -53,7 +53,7 @@ class LoopEngineConfig:
     repository: str
     owner: str
     project_number: int
-    mission_issue: int
+    mission_issue: int | None = None
     label: str = "loop-engineering"
     trunk_branch: str = "main"
     authority_refs: tuple[str, ...] = ()
@@ -64,6 +64,8 @@ class LoopEngineConfig:
     integration_work: int | None = None
     ci_workflow_name: str = "Deterministic CI"
     work_branch_template: str = "loop/work-{issue}"
+    initial_project_status: str = "Backlog"
+    done_project_status: str = "Done"
     self_improvement: SelfImprovementConfig = field(default_factory=SelfImprovementConfig)
 
     def __post_init__(self) -> None:
@@ -76,6 +78,8 @@ class LoopEngineConfig:
             ("issue_level", self.issue_level),
             ("ci_workflow_name", self.ci_workflow_name),
             ("work_branch_template", self.work_branch_template),
+            ("initial_project_status", self.initial_project_status),
+            ("done_project_status", self.done_project_status),
         )
         for name, value in text_fields:
             if not value.strip():
@@ -84,9 +88,8 @@ class LoopEngineConfig:
             raise ValueError("repositoryはowner/name形式で指定してください")
         if self.project_number < 1:
             raise ValueError("project_numberは1以上である必要があります")
-        if self.mission_issue < 1:
-            raise ValueError("mission_issueは1以上である必要があります")
         optional_issue_fields: tuple[tuple[str, int | None], ...] = (
+            ("mission_issue", self.mission_issue),
             ("root_issue", self.root_issue),
             ("parent_issue", self.parent_issue),
             ("integration_work", self.integration_work),
@@ -115,7 +118,7 @@ class LoopEngineConfig:
             repository=repository,
             owner=owner,
             project_number=_required_int_mapping(environment, "LOOP_PROJECT_NUMBER"),
-            mission_issue=_required_int_mapping(environment, "LOOP_MISSION_ISSUE"),
+            mission_issue=_optional_int_mapping(environment, "LOOP_MISSION_ISSUE"),
             label=environment.get("LOOP_LABEL", "loop-engineering").strip()
             or "loop-engineering",
             trunk_branch=environment.get("LOOP_TRUNK_BRANCH", "main").strip() or "main",
@@ -136,6 +139,14 @@ class LoopEngineConfig:
                 "LOOP_WORK_BRANCH_TEMPLATE", "loop/work-{issue}"
             ).strip()
             or "loop/work-{issue}",
+            initial_project_status=environment.get(
+                "LOOP_INITIAL_PROJECT_STATUS", "Backlog"
+            ).strip()
+            or "Backlog",
+            done_project_status=environment.get(
+                "LOOP_DONE_PROJECT_STATUS", "Done"
+            ).strip()
+            or "Done",
             self_improvement=_self_improvement_from_environment(environment),
         )
 
@@ -330,7 +341,7 @@ class LoopEngineeringSettings:
             repository=repository,
             owner=owner,
             project_number=_required_int_section(project, "project_number"),
-            mission_issue=_required_int_section(project, "mission_issue"),
+            mission_issue=_optional_int_section(project, "mission_issue"),
             label=project.get("label", "loop-engineering").strip() or "loop-engineering",
             trunk_branch=project.get("trunk_branch", "main").strip() or "main",
             authority_refs=_csv(project.get("authority_refs", "")),
@@ -349,6 +360,14 @@ class LoopEngineeringSettings:
             work_branch_template=(
                 project.get("work_branch_template", "loop/work-{issue}").strip()
                 or "loop/work-{issue}"
+            ),
+            initial_project_status=(
+                project.get("initial_project_status", "Backlog").strip()
+                or "Backlog"
+            ),
+            done_project_status=(
+                project.get("done_project_status", "Done").strip()
+                or "Done"
             ),
             self_improvement=self_improvement,
         )
@@ -424,7 +443,6 @@ class LoopEngineeringSettings:
                 "LOOP_REPOSITORY": engine.repository,
                 "LOOP_PROJECT_OWNER": engine.owner,
                 "LOOP_PROJECT_NUMBER": str(engine.project_number),
-                "LOOP_MISSION_ISSUE": str(engine.mission_issue),
                 "LOOP_LABEL": engine.label,
                 "LOOP_TRUNK_BRANCH": engine.trunk_branch,
                 "LOOP_AUTHORITY_REFS": ",".join(engine.authority_refs),
@@ -432,6 +450,8 @@ class LoopEngineeringSettings:
                 "LOOP_ISSUE_LEVEL": engine.issue_level,
                 "LOOP_CI_WORKFLOW_NAME": engine.ci_workflow_name,
                 "LOOP_WORK_BRANCH_TEMPLATE": engine.work_branch_template,
+                "LOOP_INITIAL_PROJECT_STATUS": engine.initial_project_status,
+                "LOOP_DONE_PROJECT_STATUS": engine.done_project_status,
                 "LOOP_IMPLEMENTER_PROVIDER": self.models.implementer_provider,
                 "LOOP_IMPLEMENTER_MODEL": self.models.implementer_model,
                 "LOOP_REVIEWER_PROVIDER": self.models.reviewer_provider,
@@ -476,6 +496,7 @@ class LoopEngineeringSettings:
             else:
                 values[runtime_name] = value
         optional_runtime_values: tuple[tuple[str, int | None], ...] = (
+            ("LOOP_MISSION_ISSUE", engine.mission_issue),
             ("LOOP_ROOT_ISSUE", engine.root_issue),
             ("LOOP_PARENT_ISSUE", engine.parent_issue),
             ("LOOP_INTEGRATION_WORK", engine.integration_work),

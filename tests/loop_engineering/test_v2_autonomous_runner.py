@@ -354,6 +354,27 @@ def test_waiting_dispatch_is_retryable() -> None:
     assert transitions.calls == [item.work_identity]
 
 
+def test_completed_first_work_selects_next_work() -> None:
+    completed = replace(
+        observation(2),
+        issue_state="CLOSED",
+        lifecycle="COMPLETED",
+        project_status="Done",
+    )
+    second = observation(3)
+    runtime = MemoryRuntime()
+    transitions = RecordingTransitions()
+
+    result = application(
+        runtime,
+        MutableQueue((completed, second)),
+        transitions,
+    ).run(registration(), max_iterations=1)
+
+    assert result.status is AutonomousRunStatus.PROGRESSED
+    assert transitions.calls == [second.work_identity]
+
+
 def test_all_completed_works_complete_goal() -> None:
     completed1 = replace(
         observation(2),

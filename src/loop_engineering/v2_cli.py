@@ -238,6 +238,8 @@ def legacy_host_block_reason(
     environment: Mapping[str, str],
 ) -> str | None:
     """RepositoryがV2切替済みなら旧Host入口をfail-closedで拒否する。"""
+    if settings.engine.mission_issue is None:
+        return "LEGACY_MISSION_ISSUE_REQUIRED"
     if not _database_configured(environment):
         return None
     database = PostgreSQLCommandAdapter(SubprocessCommandRunner(), environment)

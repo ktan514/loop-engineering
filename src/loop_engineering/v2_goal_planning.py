@@ -35,6 +35,7 @@ class ProductDevelopmentRegistration:
     work_branch_template: str
     ci_workflow_name: str
     initial_project_status: str
+    done_project_status: str = "Done"
     human_verification_policy: str = "WHEN_REQUIRED"
     self_improvement_target: str | None = None
 
@@ -50,6 +51,7 @@ class ProductDevelopmentRegistration:
             self.work_branch_template,
             self.ci_workflow_name,
             self.initial_project_status,
+            self.done_project_status,
             self.human_verification_policy,
         )
         if any(not value.strip() or value.strip() != value for value in text_values):

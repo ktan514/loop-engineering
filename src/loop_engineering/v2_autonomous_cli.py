@@ -211,6 +211,7 @@ def run_autonomous(
             for item in settings.verification_commands
         ),
         scope_paths=(".",),
+        done_project_status=settings.engine.done_project_status,
     )
     application = V2AutonomousRunner(
         runtime,
@@ -220,7 +221,11 @@ def run_autonomous(
         evidence,
         V2Supervisor(),
         transitions,
-        goal_completion=GitHubGoalCompletion(text_runner, bootstrap_state),
+        goal_completion=GitHubGoalCompletion(
+            text_runner,
+            bootstrap_state,
+            done_status=settings.engine.done_project_status,
+        ),
     )
 
     while True:
@@ -281,7 +286,8 @@ def _registration(
         acceptance_criteria=acceptance,
         work_branch_template=settings.engine.work_branch_template,
         ci_workflow_name=settings.engine.ci_workflow_name,
-        initial_project_status="Backlog",
+        initial_project_status=settings.engine.initial_project_status,
+        done_project_status=settings.engine.done_project_status,
         human_verification_policy="WHEN_REQUIRED",
         self_improvement_target=(
             settings.engine.self_improvement.repository

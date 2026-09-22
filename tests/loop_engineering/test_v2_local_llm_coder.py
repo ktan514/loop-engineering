@@ -23,6 +23,8 @@ from loop_engineering.v2_implementer import (
 )
 from loop_engineering.v2_local_llm_coder import (
     LocalLlmCoderImplementerAdapter,
+    _read_worker_result,
+    _request_identity,
     build_implementer_backend,
 )
 
@@ -551,3 +553,54 @@ def test_local_config_falls_back_to_implementer_model(tmp_path: Path) -> None:
 
     assert loaded.local_llm_coder is not None
     assert loaded.local_llm_coder.model_profile == "compatibility-profile"
+
+
+def test_design_pass_can_defer_product_verification(tmp_path: Path) -> None:
+    target_packet = replace(
+        packet(tmp_path, ImplementerTransition.DESIGN),
+        canonical_design_identities=(),
+        acceptance_checks=("product tests pass",),
+    )
+    request_identity = _request_identity(target_packet, "IMPLEMENTER", "local-main")
+    result_path = tmp_path / "result.json"
+    result_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "request_identity": request_identity,
+                "task_packet_identity": target_packet.packet_identity,
+                "role": "IMPLEMENTER",
+                "input_target_identity": target_packet.exact_base_sha,
+                "result_target_identity": target_packet.exact_base_sha,
+                "change_identity": "sha256:" + "1" * 64,
+                "status": "PASS",
+                "failure_kind": None,
+                "completion": {
+                    "scope_checked": True,
+                    "target_identity_checked": True,
+                    "work_finalized": True,
+                    "verification_finalized": True,
+                },
+                "findings": [],
+                "changed_paths": ["docs/design.md"],
+                "verification_evidence": [],
+                "diagnostics": [],
+                "session_id": "session-design",
+                "artifacts": {
+                    "runtime_directory": None,
+                    "event_log": None,
+                    "stderr_log": None,
+                    "agent_artifact_refs": [],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    parsed = _read_worker_result(
+        result_path,
+        packet=target_packet,
+        request_identity=request_identity,
+    )
+
+    assert parsed.status == "PASS"

@@ -109,6 +109,7 @@ class GitHubV2WorkQueue:
                 _observation(
                     definition=definition,
                     record=record,
+                    done_project_status=registration.done_project_status,
                     canonical_design_identities=(
                         recovered.task_packet.canonical_design_identities
                         if recovered.task_packet is not None
@@ -187,6 +188,7 @@ def _observation(
     *,
     definition: WorkDefinitionSnapshot,
     record: WorkRecord,
+    done_project_status: str,
     canonical_design_identities: tuple[str, ...],
     unresolved_conflict: bool,
 ) -> V2WorkObservation:
@@ -198,6 +200,7 @@ def _observation(
         lifecycle=record.lifecycle,
         project_status=definition.project_status,
         priority=definition.priority,
+        done_project_status=done_project_status,
         dependency_states=definition.dependency_states,
         acceptance_digest=definition.acceptance_criteria_digest,
         selected_transition=record.selected_transition,

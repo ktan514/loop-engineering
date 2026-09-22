@@ -48,6 +48,7 @@ class V2WorkObservation:
     priority: str | None
     dependency_states: tuple[str, ...]
     acceptance_digest: str | None
+    done_project_status: str = "Done"
     selected_transition: str | None = None
     canonical_design_identities: tuple[str, ...] = ()
     active_lineage_identity: str | None = None
@@ -75,7 +76,7 @@ class V2WorkObservation:
         return (
             self.lifecycle == "COMPLETED"
             and self.issue_state == "CLOSED"
-            and self.project_status == "Done"
+            and self.project_status == self.done_project_status
         )
 
 
