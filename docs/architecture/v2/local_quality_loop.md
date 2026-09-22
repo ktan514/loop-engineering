@@ -98,7 +98,6 @@ Worker findingを無条件にFixerへ渡さない。Hostは各findingを次へ�
 - `APPROVED`
 - `REJECTED`
 - `DUPLICATE`
-- `NEEDS_CLARIFICATION`
 
 検証項目:
 
@@ -111,7 +110,7 @@ Worker findingを無条件にFixerへ渡さない。Hostは各findingを次へ�
 - basis / evidence / impact / suggested_fixが空でない
 - 同一target上の同一内容findingをduplicateとして識別
 
-`APPROVED BLOCKING`だけをFixerの`approved_findings`へ渡す。`REJECTED` / `DUPLICATE`を修正対象へ昇格しない。`NEEDS_CLARIFICATION`が残る場合はLOCAL_PASSにしない。
+`APPROVED BLOCKING`だけをFixerの`approved_findings`へ渡す。`REJECTED` / `DUPLICATE`を修正対象へ昇格しない。`REJECTED`が残るreviewはLOCAL_PASSにせず、同一targetで再reviewする。反復して進展しない場合はno-progress guardでBLOCKする。
 
 NON_BLOCKING findingは履歴へ保存するが、APPROVED BLOCKINGが0、NEEDS_CLARIFICATIONが0、その他Completion条件が成立する場合はHost側Local Review GateをPASSとしてよい。
 
@@ -122,7 +121,7 @@ NON_BLOCKING findingは履歴へ保存するが、APPROVED BLOCKINGが0、NEEDS_
 - required deterministic verification PASS
 - fresh Local Self Reviewがterminal
 - APPROVED BLOCKING = 0
-- NEEDS_CLARIFICATION = 0
+- REJECTED finding = 0
 - Completion Contract充足
 - review前後でtarget identity不変
 - no-progress guard未発火
@@ -149,9 +148,9 @@ Repair成功後にtarget identityが変化しない場合はno-progressとみな
 
 ## 9. Bounded loop
 
-既定の自動Local Review / Repair cycle上限は3とする。
+既定の自動Local Review / Repair cycle上限は12とする。Production固有policyへ将来外出しできるようCoordinator引数として保持し、無限反復は許可しない。
 
-同じtarget / 同じapproved blocking fingerprintが進捗なしで反復する場合、無限loopせず`BLOCKED / LOCAL_REVIEW_NO_PROGRESS`へ移行する。
+同じtarget / 同じapproved blocking fingerprintが進捗なしで反復する場合、無限loopせず`BLOCKED / LOCAL_REPAIR_NO_PROGRESS`または`LOCAL_FINDING_VALIDATION_NO_PROGRESS`へ移行する。
 
 process restartでcountを失わない。
 
