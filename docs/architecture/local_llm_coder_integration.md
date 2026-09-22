@@ -344,7 +344,10 @@ ReviewLevelPolicy
 - timeout
 - context_policy
 - escalation_policy
+- passes_required
 ```
+
+同一Levelで複数回のfresh reviewを要求する場合は`passes_required`を1以上で設定する。各passは別ReviewRequestKeyを持ち、同一exact targetでもpass 1の結果をpass 2へ流用しない。低レベルAPIを2回、高レベルAPIを2回通す構成もLevel設定だけで表現し、CoreへLOW/HIGHという固有名を埋め込まない。
 
 review resultは既存`ReviewResult`契約へ正規化する。
 
@@ -369,7 +372,7 @@ EXTERNAL_REVIEW_Ln
 
 修正でexact targetが変わったため、旧HEADに対するL1..LnのPASSは全てstaleである。新HEADはLevel 1から取り直す。
 
-target identityが変化せず、provider resultの再取得やinvalid finding除外だけを行った場合は、同じLevelのrequest identityをreconcileできる。
+target identityが変化せず、provider resultの再取得やinvalid finding除外だけを行った場合は、同じLevel / same passのrequest identityをreconcileできる。
 
 ### 6.2 ESCALATE
 
