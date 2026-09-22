@@ -92,6 +92,8 @@ def test_runtime_environment_maps_secret_values_without_putting_them_in_config(
     assert values["LOOP_REPOSITORY"] == "owner/product"
     assert values["LOOP_PROJECT_NUMBER"] == "9"
     assert values["LOOP_REVIEWER_MODEL"] == "gpt-5.6-terra"
+    assert values["LOOP_INITIAL_PROJECT_STATUS"] == "Backlog"
+    assert values["LOOP_DONE_PROJECT_STATUS"] == "Done"
 
 
 
@@ -163,8 +165,8 @@ def test_project_status_names_are_product_configurable(tmp_path: Path) -> None:
     _write_config(config, str(tmp_path / "product"))
     content = config.read_text(encoding="utf-8")
     content = content.replace(
-        "work_branch_template = loop/work-{issue}\n",
-        "work_branch_template = loop/work-{issue}\n"
+        "issue_level = Work\n",
+        "issue_level = Work\n"
         "initial_project_status = Ready\n"
         "done_project_status = Completed\n",
     )
