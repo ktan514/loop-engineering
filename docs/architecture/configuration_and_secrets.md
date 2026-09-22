@@ -240,4 +240,3 @@ required = true
 明示設定がない既存構成では互換用に`git diff --check HEAD`だけを既定verificationとして使用する。Production完成Gateとして十分なtestを要求する場合は、Productに適したrequired commandをHost設定へ明示する。
 
 secret値をargvへ埋め込まない。credentialが必要な検証は別のtrusted capability policyを設計してから追加する。
-
