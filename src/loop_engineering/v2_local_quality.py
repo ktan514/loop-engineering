@@ -817,8 +817,27 @@ class LocalQualityCoordinator:
 
                 validation = validate_local_findings(review.findings, current.target.scope_paths)
                 if validation.rejected_identities:
+                    invalid_fingerprint = "invalid-findings:" + _digest(
+                        {
+                            "target": _target_fingerprint(current.target),
+                            "identities": validation.rejected_identities,
+                        }
+                    )
+                    no_progress = (
+                        state.no_progress_count + 1
+                        if state.last_progress_fingerprint == invalid_fingerprint
+                        else 1
+                    )
+                    blocked = no_progress >= self._max_no_progress
                     state = _state_replace(
                         state,
+                        stage=(
+                            LocalQualityStage.BLOCKED
+                            if blocked
+                            else LocalQualityStage.LOCAL_REVIEW
+                        ),
+                        no_progress_count=no_progress,
+                        last_progress_fingerprint=invalid_fingerprint,
                         review_request_key=review.request_identity,
                         review_identity=_local_review_identity(current.target, review),
                         diagnostics=tuple(
@@ -827,6 +846,12 @@ class LocalQualityCoordinator:
                         ),
                     )
                     self._store.save(state)
+                    if blocked:
+                        return self._blocked(
+                            current.target,
+                            state,
+                            "LOCAL_FINDING_VALIDATION_NO_PROGRESS",
+                        )
                     return LocalQualityResult(
                         LocalQualityStatus.INCOMPLETE,
                         "LOCAL_FINDING_VALIDATION_INCOMPLETE",
