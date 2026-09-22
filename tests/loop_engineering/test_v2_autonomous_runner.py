@@ -307,7 +307,7 @@ def test_restart_suppresses_same_schedule_and_selects_other_work() -> None:
         state.runtime_identity,
         first.work_identity,
         "DESIGN",
-        "WAITING",
+        "DISPATCHED",
         "restart",
     )
     transitions = RecordingTransitions()
@@ -318,6 +318,31 @@ def test_restart_suppresses_same_schedule_and_selects_other_work() -> None:
     )
 
     assert transitions.calls == [second.work_identity]
+
+
+def test_waiting_dispatch_is_retryable() -> None:
+    item = observation(2)
+    runtime = MemoryRuntime()
+    state = runtime.ensure_runtime(registration())
+    from loop_engineering.v2_supervisor import V2Transition, schedule_key
+
+    key = schedule_key(registration().goal_revision, item, V2Transition.DESIGN)
+    runtime.dispatches[key] = AutonomousDispatch(
+        key,
+        state.runtime_identity,
+        item.work_identity,
+        "DESIGN",
+        "WAITING",
+        "provider wait",
+    )
+    transitions = RecordingTransitions()
+
+    application(runtime, MutableQueue((item,)), transitions).run(
+        registration(),
+        max_iterations=1,
+    )
+
+    assert transitions.calls == [item.work_identity]
 
 
 def test_all_completed_works_complete_goal() -> None:

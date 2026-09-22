@@ -2,241 +2,186 @@
 
 管理Issue: #88
 親Issue: #81
-依存: #83, #84, #85, #86, #87
-上位正本: `autonomous_development_completion_contract.md`
+依存: #83, #84, #85, #86, #87, #98, #100, #101, #102
+上位正本: `autonomous_development_completion_contract.md`, `local_llm_coder_integration.md`
 
 ## 1. 目的
 
-Goal bootstrap / Planning / Work Queue / Supervisor / Codex Implementer / GitHub development lineage / exact-head evidence / Integrationを、1つのV2 Application Runnerへ接続する。
+任意ProductionのHost RegistrationとGoal Definitionから、Planning、設計、実装、Local Quality、External Review、修正、統合、次Work選択、Goal完了までを人間の逐次packet発行なしで自動継続する。
 
-人間がWorkごとのTaskPacketやeffectを逐次発行しなくても、初期Product RegistrationとGoal DefinitionからGoal完了まで有用な遷移を継続できることを目的とする。
+Loop Engineeringを唯一の上位Orchestratorとし、`local-llm-coder`はImplementer / Self Reviewer / Fixerのbounded Worker Backendとして扱う。
 
-旧actual-host continuous loopを復活させない。Issue本文・Issueコメント・PR本文の自然文をcurrent stateやresume Authorityにしない。
-
-## 2. Authority
-
-- Requirement / acceptance / dependency / planning field: GitHub Issue / Project
-- current Work / transition / checkpoint / dispatch / effect intent / review request: PostgreSQL
-- branch / PR / exact HEAD / CI / review / merge: live provider readback
-- Goal / Profile: Host Product Registrationで固定したtrusted source
-
-restart時も同じAuthorityを使用する。
-
-## 3. Runner iteration
-
-1回のiterationは次の順序とする。
+## 2. 完成フロー
 
 ```text
-PREFLIGHT
-→ BOOTSTRAP / PLAN (必要な場合のみ)
-→ QUEUE SYNCHRONIZE
-→ LINEAGE OBSERVE
-→ EVIDENCE OBSERVE
-→ SUPERVISOR DECIDE
-→ DISPATCH INTENT RECORD
-→ TRANSITION EXECUTE または SAFE YIELD
-→ FRESH READBACK
-→ RUNTIME CHECKPOINT
+Product Registration + Goal
+→ PREFLIGHT
+→ BOOTSTRAP / PLAN
+→ Work生成 / Project投影
+→ SELECT dependency-ready Work
+→ DESIGN
+→ publish exact lineage
+→ IMPLEMENT
+→ publish exact lineage
+→ VERIFY_LOCAL
+→ fresh LOCAL_REVIEW
+   ├─ finding → same-lineage LOCAL REPAIR
+   │            → publish
+   │            → VERIFY_LOCALから再取得
+   └─ LOCAL_PASS
+→ EXTERNAL_REVIEW Level 1 / pass 1..N
+→ Level 2..N / pass 1..N
+   ├─ finding → same-lineage REPAIR
+   │            → publish
+   │            → VERIFY_LOCAL
+   │            → fresh LOCAL_REVIEW
+   │            → LOCAL_PASS
+   │            → External Level 1 / pass 1から全て再取得
+   └─ EXTERNAL_PASS
+→ HUMAN_VERIFY?（Product policyでrequiredの場合）
+→ INTEGRATE
+→ COMPLETE_WORK
+→ next dependency-ready Work
+→ 全Work完了 + Goal acceptance PASS
+→ GOAL_COMPLETED
 ```
 
-1 iterationに複数の外部mutationを無制限に詰め込まない。外部effectを持つtransitionは既存のDB intent/readback契約を使用する。
+## 3. Production非依存境界
 
-## 4. AutonomousRuntimeState
+CoreへProduct固有repository、model名、test command、LOW/HIGH reviewer名を固定しない。
 
-PostgreSQLへProduct/Goal単位のrunner状態を保持する。
+- Product identity / Workspace / GitHub Project / branch template: Host Registration
+- Implementer Backend / model profile: Host設定
+- Local Reviewer profile: local-llm-coder profile
+- External Review Level 1..N / passes_required: Host設定
+- Product verification command: trusted command descriptor
+- canonical design target / acceptance: Planning result
+-変更scope: trusted Work/Profile。generic fallbackはrepository root `.`
 
-- `runtime_identity`
-- `product_key`
-- `repository`
-- `goal_revision`
-- `status`: `ACTIVE | WAITING | INTERVENTION_REQUIRED | COMPLETED`
-- `current_work_identity?`
-- `last_schedule_key?`
-- `last_progress_fingerprint?`
-- `no_progress_count`
-- `last_detail`
-- `completed_at?`
+`.`は「shell wildcard」ではなくtyped repository-root scopeとして扱う。path traversalは引き続き拒否する。
 
-さらにdispatch journalを保持する。
+## 4. Workspace-effect Backend
 
-- `schedule_key`
-- `runtime_identity`
-- `work_identity`
-- `transition`
-- `status`: `DISPATCHED | COMPLETED | WAITING | FAILED | SUPERSEDED`
+local-llm-coderはActive Production Workspaceを直接変更できる。
 
-同じexact observationから生成された同じScheduleKeyを、restart後に無条件再dispatchしない。
+RunnerはWorker resultだけを信用せず、Host readback後に次を行う。
 
-## 5. Progress fingerprint
+1. exact HEAD / branch / changed pathを確認
+2. scope外変更を拒否
+3. dirty changeならHostがstage / diff-check / commit
+4. Workerがforward commit済みならancestor関係を確認
+5. trusted `MaterializedProposal`へ正規化
+6.既存GitHub lineage effectでbranch/PRをpublish
+7. fresh remote PR/head readback
 
-Runnerはiteration開始/終了時にtyped stateからfingerprintを生成する。
+Codex proposal Backendも同じ`V2ImplementerPort`の別経路として維持する。
 
-入力:
+## 5. Quality target
 
-- goal revision
-- current Work identity
-- Work observation identities/revisions
-- exact HEAD
-- CI/review/Human evidence identities
-- latest packet/checkpoint identities
-- pending effect有無
-- Supervisor decision
+Local / External ReviewはHEADだけでなく`change_identity`へbindする。
 
-同じfingerprintで同じScheduleKeyを繰り返す場合、provider再送を行わない。
+committed remote PRをreviewするときは、work branch + exact HEAD + clean workspaceから`local-llm-coder-change-v2` identityを再構成する。
 
-bounded `no_progress_count` を超えた場合:
+修正・commit・HEAD移動が1回でも起きた場合、旧targetのLocal/External PASSはcurrent targetへ流用しない。
 
-- 外部待ちの根拠がある: `WAITING`
-- provider/DB conflictや安全証明不能: `INTERVENTION_REQUIRED`
-- repair可能なCI/review failure: REPAIRへ戻す
+## 6. Durable stage
 
-## 6. Lineage observation
+PostgreSQLが少なくとも次を保持する。
 
-#84 Queueのtyped WorkDefinitionに、live GitHub development lineageを重ねる。
+- autonomous runtime
+- accepted Goal plan / projection
+- current Work / selected transition
+- dispatch journal / ScheduleKey
+- Local Quality stage / evidence
+- External Review level / pass / evidence
+- task/checkpoint/effect intent
+- pending/UNCERTAIN effect
 
-branchはHost Registrationの`work_branch_template`からWork Issue番号を使って決定する。
+Issue commentやLLM session終了をresume Authorityにしない。
 
-観測:
+## 7. WAITINGと再開
 
-- remote branch存在/HEAD
-- open PR head/base/draft
-- competing open PR
-- merged state
+`WAITING`は再実行可能なidempotent stageを表す。
 
-0件なら未実装Work、1件ならactive lineage、複数競合ならfail-closed。
+例:
 
-historical closed PRをcurrent PRとして採用しない。
+- Local Worker INCOMPLETE
+- Reviewer provider一時待機
+- CI / Human Verification pending
+- eventual consistency
 
-## 7. Evidence observation
+WAITING dispatchを永続的なduplicate suppression対象にしてはならない。同じstageは各内部request identity/idempotency contractを使って安全に再開する。
 
-active PRが存在するWorkだけ #87 EvidenceCoordinatorへ渡す。
+一方、provider/effect送信後に結果未確定の`DISPATCHED`は盲目的再送せずreadback/reconcileを優先する。terminal `COMPLETED` ScheduleKeyも再dispatchしない。
 
-- CI PENDING / NOT_RUN: safe wait
-- CI FAIL: REPAIR
-- CI PASS: independent reviewをexact HEADでensure
-- Review REQUEST_CHANGES: REPAIR
-- Review PASS: Human Verification policy確認
-- Human pending: safe wait
-- all PASS: INTEGRATE
+## 8. REQUEST_CHANGES
 
-old-head evidenceは採用しない。
+External Reviewで承認済みblocking findingが出た場合:
 
-## 8. Transition execution
+```text
+External Review
+→ durable REQUEST_CHANGES
+→ Supervisor REPAIR
+→ Fixerへapproved_findingsだけ渡す
+→ same lineageで変更
+→ publish
+→ new exact target
+→ Local Qualityから全Gate取り直し
+```
 
-### DESIGN / IMPLEMENT / REPAIR
+旧External level途中から再開しない。
 
-- Supervisor decisionから`DevelopmentTaskPacket`を組み立てる。
-- #85 proposal modeを呼ぶ。
-- proposalを#86 trusted materializerへ渡す。
-- active lineageを#86 remote effectへpublishする。
-- fresh PR/head readbackを行う。
+## 9. Integration Gate
 
-DESIGN成功後は変更されたcanonical design targetのidentityを新HEADへbindし、次iterationでIMPLEMENT可能にする。
+merge直前に同じcurrent targetについて最低限次をfresh確認する。
 
-### VERIFY / REVIEW / HUMAN_VERIFY
-
-これらはevidence observerが外部状態を確認する段階であり、pending状態でmutationを作らない。
-
-必要なprovider requestは#87 ReviewCoordinatorのrequest-key契約だけで行う。
-
-### INTEGRATE
-
-- exact current HEAD
-- CI PASS
-- review PASS
+- Local PASS
+- External PASS
 - required Human PASS
+- current PR exact HEAD
 - competing lineageなし
 - pending/UNCERTAIN effectなし
 
-をfresh確認後、既存V2 MERGE effectのintent/readback契約でmergeする。
+旧targetのPASSや自然文「review済み」をmerge根拠にしない。
 
-### COMPLETE_WORK
+## 10. Goal completion
 
-merge readback後、DB lifecycleを`COMPLETED`へ進め、Product Issueをcloseし、Project StatusをDoneへ投影する。Issue close/Project updateもtarget限定readbackを持つ。
+Goal完了は次をすべて満たした場合だけ。
 
-## 9. WaitingとHuman Intervention
-
-`WAITING`:
-
-- CI pending
-- review provider pending
-- Human Verification pending
-- dependency pending
-- lease held
-- provider eventual consistency
-
-`INTERVENTION_REQUIRED`:
-
-- duplicate/competing current lineage
-- target identity conflict
-- unresolved UNCERTAIN effect
-- DB corruption/unavailable
-- trusted cleanup証明不能
-- required provider credential/config欠落
-- policyで人間判断が必須なreview escalation
-
-repair可能なtest/CI/review failureをHuman Interventionへ送らない。
-
-## 10. Restart / crash recovery
-
-起動時にPostgreSQLからruntime/work/effect状態を読む。
-
-- pending `INTENT_RECORDED` / `UNCERTAIN` effectはfresh readback優先
-- CONFIRMED済みeffectを再送しない
-- active WorkはQueue/live lineageから再構成
-- last ScheduleKeyと同一stateならduplicate dispatchを抑止
-- Issueコメント自然文をparseしてresumeしない
-
-crash window:
-
-- dispatch intent前: 再decide可
-- dispatch intent後 / provider call前: journalにより同一ScheduleKey再送を抑止し、transition固有readbackでreconcile
-- provider call後 / outcome確定前: provider/live stateをreadback
-- outcome後 / checkpoint前: DB terminal stateからcheckpointを再構成
-
-## 11. Goal completion
-
-Goal完了は次をすべてfreshに満たす場合のみ。
-
-- 全planned Work lifecycle `COMPLETED`
-- 全Work Issue/Project planning stateが完了条件と整合
-- pending/UNCERTAIN effectなし
+- planned Workが全て`COMPLETED`
+- Product Issue / Project状態が完了条件と整合
+- pending/UNCERTAIN effect 0
 - current Workなし
 - Goal acceptance evaluator PASS
 
-完了後runtimeを`COMPLETED`へ確定し、自律dispatchを停止する。
+完了後はruntimeを`COMPLETED`へ確定し、自律dispatchを停止する。
 
-## 12. Platform self-improvement境界
+## 11. 起動
 
-Product側の修正で解消できないPlatform contract/safety/provider/recovery不具合はSelfImprovementPortへtyped reportを渡す。
+通常の自律production経路:
 
-Product Work IssueへPlatform内部の実装詳細を混ぜない。SelfImprovement target未設定時に別Repositoryへ勝手に書き込まない。
-
-## 13. Runner API
-
-```text
-V2AutonomousRunner.run(registration, max_iterations=N)
-→ AutonomousRunResult
+```bash
+pipenv run python -m loop_engineering --v2-autonomous
 ```
 
-status:
+bounded確認:
 
-- `GOAL_COMPLETED`
-- `PROGRESSED`
-- `WAITING`
-- `INTERVENTION_REQUIRED`
-- `ITERATION_LIMIT`
+```bash
+pipenv run python -m loop_engineering --v2-autonomous-once
+```
 
-`run()`はbounded iterationを必須とし、無限whileをCore APIに埋め込まない。常駐processは上位launcherがbounded runを繰り返す。
+Operational Store migrationは起動前にcurrentでなければならない。
 
-## 14. 完了条件
+## 12. Hard invariants
 
-- bootstrap済み/未bootstrap両方から開始できる。
-- Workを人間が逐次選択しない。
-- wait-only Workが別のdependency-ready Workを塞がない。
-- restart後にDB/live readbackから継続できる。
-- pending/UNCERTAIN effectを盲目的再送しない。
-- same ScheduleKeyの無限dispatchを防ぐ。
-- Work完了後に次Workへ進む。
-- fresh evidenceからGoal完了を確定する。
-- tests / exact-head CIを通過する。
+- OrchestratorはLoop Engineeringだけ
+- main/trunkへ直接開発commitしない
+- local Workerのprocess終了だけでWork完了にしない
+- Reviewerは実装sessionと分離
+- target変更後に旧quality evidenceを使わない
+- approved finding以外をFixerへ渡さない
+- WAITINGはsafe resume可能
+- DISPATCHED/UNCERTAIN effectはblind retryしない
+- provider/model/Product固有値をCoreへ固定しない
+- secret値をTaskPacket/DB/logへ保存しない
+- Goal完了をWork未完の状態で確定しない

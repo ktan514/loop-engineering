@@ -184,7 +184,7 @@ class PostgreSQLAutonomousRuntimeStore:
         rows = self._query(
             "SELECT schedule_key FROM loop_autonomous_dispatches "
             f"WHERE runtime_identity = {_literal(runtime_identity_value)} "
-            "AND status IN ('DISPATCHED', 'COMPLETED', 'WAITING')"
+            "AND status IN ('DISPATCHED', 'COMPLETED')"
         )
         return frozenset(_required_string(row, "schedule_key") for row in rows)
 
