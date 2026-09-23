@@ -186,7 +186,6 @@ def environment() -> dict[str, str]:
         "PATH": "/usr/bin",
         "HOME": "/tmp/home",
         "PYENV_ROOT": "/tmp/pyenv",
-        "LOCAL_LLM_CODER_PROFILE_CONFIG": "/tmp/local-profiles.json",
         "GH_TOKEN": "secret-gh",
         "OPENAI_API_KEY": "secret-openai",
         "OPENAI_API_KEY_REVIEWER": "secret-reviewer",
