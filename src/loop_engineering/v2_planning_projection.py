@@ -88,7 +88,11 @@ class GitHubPlanningProjectionAdapter:
             body=_goal_body(registration, proposal),
         )
         goal_item = self._ensure_project_item(
-            registration, project_id, goal_issue.url, role="goal"
+            registration,
+            project_id,
+            goal_issue.number,
+            goal_issue.url,
+            role="goal",
         )
         self._ensure_field(
             registration,
@@ -112,6 +116,7 @@ class GitHubPlanningProjectionAdapter:
             item = self._ensure_project_item(
                 registration,
                 project_id,
+                issue.number,
                 issue.url,
                 role=f"work:{work.logical_key}",
             )
@@ -191,12 +196,18 @@ class GitHubPlanningProjectionAdapter:
         self,
         registration: ProductDevelopmentRegistration,
         project_id: str,
+        issue_number: int,
         issue_url: str,
         *,
         role: str,
     ) -> _ProjectItem:
         def readback() -> _ProjectItem | None:
-            return self._find_project_item(project_id, issue_url)
+            return self._find_project_item(
+                registration.repository_identity,
+                issue_number,
+                project_id,
+                issue_url,
+            )
 
         def mutate() -> None:
             self._run_json(
@@ -494,10 +505,21 @@ class GitHubPlanningProjectionAdapter:
             result.append(_ProjectField(field_id, name, kind))
         return tuple(result)
 
-    def _find_project_item(self, project_id: str, issue_url: str) -> _ProjectItem | None:
+    def _find_project_item(
+        self,
+        repository: str,
+        issue_number: int,
+        project_id: str,
+        issue_url: str,
+    ) -> _ProjectItem | None:
+        if "/" not in repository or issue_number < 1:
+            raise PlanningProjectionError("PROJECT_ITEM_READBACK_INPUT_INVALID")
+        owner, name = repository.split("/", maxsplit=1)
         query = (
-            "query($project:ID!){node(id:$project){... on ProjectV2{items(first:100){"
-            "nodes{id content{... on Issue{url}}} pageInfo{hasNextPage}}}}}"
+            "query($owner:String!,$name:String!,$issue:Int!){"
+            "repository(owner:$owner,name:$name){issue(number:$issue){"
+            "projectItems(first:100){nodes{id project{id}} "
+            "pageInfo{hasNextPage}}}}}"
         )
         raw = self._run_json(
             (
@@ -507,10 +529,17 @@ class GitHubPlanningProjectionAdapter:
                 "-f",
                 f"query={query}",
                 "-f",
-                f"project={project_id}",
+                f"owner={owner}",
+                "-f",
+                f"name={name}",
+                "-F",
+                f"issue={issue_number}",
             )
         )
-        items = _nested(raw, "data", "node", "items")
+        issue = _nested(raw, "data", "repository", "issue")
+        items = issue.get("projectItems")
+        if not isinstance(items, dict):
+            raise PlanningProjectionError("PROJECT_ITEM_READBACK_INVALID")
         if _has_next_page(items):
             raise PlanningProjectionError("PROJECT_ITEMS_PAGINATED")
         nodes = items.get("nodes")
@@ -521,11 +550,12 @@ class GitHubPlanningProjectionAdapter:
             if not isinstance(node, dict):
                 continue
             item_id = node.get("id")
-            content = node.get("content")
-            if not isinstance(content, dict):
-                continue
-            observed_url = content.get("url")
-            if isinstance(item_id, str) and observed_url == issue_url:
+            project = node.get("project")
+            if (
+                isinstance(item_id, str)
+                and isinstance(project, dict)
+                and project.get("id") == project_id
+            ):
                 matches.append(_ProjectItem(item_id, issue_url))
         if len(matches) > 1:
             raise PlanningProjectionError("PROJECT_ITEM_CONFLICT")
