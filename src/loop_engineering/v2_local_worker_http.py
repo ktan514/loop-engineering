@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import json
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from typing import Any
+from urllib import error, request
 
 
 MAX_WORKER_HTTP_RESPONSE_BYTES = 2_000_000
@@ -39,7 +38,7 @@ def post_worker_request(
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode("utf-8")
-    http_request = urllib.request.Request(
+    http_request = request.Request(
         endpoint.rstrip("/") + "/v1/worker",
         data=body,
         headers={
@@ -50,11 +49,11 @@ def post_worker_request(
     )
 
     try:
-        response = urllib.request.urlopen(
+        response = request.urlopen(
             http_request,
             timeout=timeout_seconds,
         )
-    except urllib.error.HTTPError as exc:
+    except error.HTTPError as exc:
         try:
             exc.read(MAX_WORKER_HTTP_RESPONSE_BYTES + 1)
         except OSError:
@@ -63,7 +62,7 @@ def post_worker_request(
             "LOCAL_WORKER_HTTP_ERROR",
             exc.code,
         ) from exc
-    except urllib.error.URLError as exc:
+    except error.URLError as exc:
         if isinstance(exc.reason, TimeoutError):
             raise LocalWorkerHttpTimeout from exc
         raise LocalWorkerHttpFailure(
