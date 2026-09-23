@@ -688,6 +688,7 @@ class LocalLlmCoderReviewerAdapter:
         model_profile: str,
         *,
         timeout_seconds: int = 1800,
+        worker_client: object = post_worker_request,
     ) -> None:
         if not model_profile.strip():
             raise ValueError("LOCAL_REVIEWER_PROFILE_REQUIRED")
@@ -699,6 +700,7 @@ class LocalLlmCoderReviewerAdapter:
         self._environment = _sanitized_environment(environment)
         self._model_profile = model_profile
         self._timeout_seconds = timeout_seconds
+        self._worker_client = worker_client
 
     def review(self, context: LocalQualityContext) -> LocalReviewExecutionResult:
         if context.workspace_canonical_path.resolve(strict=False) != self._workspace:
@@ -712,7 +714,7 @@ class LocalLlmCoderReviewerAdapter:
         request_identity = _required_string(payload["request_identity"])
         task_identity = _required_string(payload["task_packet_identity"])
         try:
-            response = post_worker_request(
+            response = self._worker_client(
                 self._config.endpoint,
                 self._config.production_name,
                 payload,
