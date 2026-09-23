@@ -138,15 +138,16 @@ GH_TOKEN=
 
 ## 7. Pipenvとの関係
 
-通常起動はPipenvを使用する。
+通常のローカル実行では最初に`pipenv shell`でproject `.venv`を有効化する。
 
 ```text
-pipenv run python -m loop_engineering
+pipenv shell
+python -m loop_engineering
 ```
 
-Pipenvがproject rootの`.env`を自動読込して子process環境へ注入する。通常起動前に`source .env`を要求しない。
+Pipenvがshell開始時にproject rootの`.env`を環境変数として読み込む。以後は有効化済み`.venv`の`python` / `pytest` / `ruff` / `mypy`を直接実行し、個別に`pipenv run`を重ねない。
 
-Loop Engineering自身は`.env`をloadせず、注入済み環境変数を参照しながら`config/loop-engineering.ini`をロードする。
+Loop Engineering自身は`.env`をloadせず、現在processへ注入済みの環境変数を参照しながら`config/loop-engineering.ini`をロードする。
 
 既にホスト環境へ注入された環境変数も同じ契約で使用できる。
 
@@ -167,7 +168,8 @@ CLI overrideは設定ファイルの選択等の明示的な一時変更に限�
 
 - Workspace pathは選択された設定ファイルから解決する
 - Pythonコードは`.env`を直接loadしない
-- `.env`はPipenvが自動読込するdotenvとして扱う
+- `.env`は`pipenv shell`開始時にPipenvが環境変数へ読み込む
+- `.venv`有効化後は個別の`pipenv run`を使用しない
 - `.env`へshell command substitutionを書かない
 - `CODEX_BIN` / `PATH`はzsh側で管理する
 - 通常起動前に`source .env`を要求しない
