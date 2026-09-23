@@ -12,11 +12,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .config import LocalLlmCoderConfig, LoopEngineeringSettings
-from .v2_local_worker_http import (
-    LocalWorkerHttpFailure,
-    LocalWorkerHttpTimeout,
-    post_worker_request,
-)
 from .v2_implementer import (
     CodexProposalImplementer,
     DevelopmentTaskPacket,
@@ -28,6 +23,11 @@ from .v2_implementer import (
     VerificationEvidence,
     WorkspaceEffectReport,
     validate_development_task_packet,
+)
+from .v2_local_worker_http import (
+    LocalWorkerHttpFailure,
+    LocalWorkerHttpTimeout,
+    post_worker_request,
 )
 
 _SHA_RE = re.compile(r"[0-9a-f]{40}")
