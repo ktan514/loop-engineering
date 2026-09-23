@@ -109,12 +109,28 @@ class FakeGitHubRunner:
                         }
                     )
                 return _graphql({"fields": {"nodes": nodes, "pageInfo": {"hasNextPage": False}}})
-            if "items(first:100)" in query:
+            if "projectItems(first:100)" in query:
+                issue_number = int(command[-1].split("=", 1)[1])
+                suffix = f"/issues/{issue_number}"
                 nodes = [
-                    {"id": item["id"], "content": {"url": item["issue_url"]}}
+                    {"id": item["id"], "project": {"id": "PROJECT"}}
                     for item in self.items
+                    if str(item["issue_url"]).endswith(suffix)
                 ]
-                return _graphql({"items": {"nodes": nodes, "pageInfo": {"hasNextPage": False}}})
+                return json.dumps(
+                    {
+                        "data": {
+                            "repository": {
+                                "issue": {
+                                    "projectItems": {
+                                        "nodes": nodes,
+                                        "pageInfo": {"hasNextPage": False},
+                                    }
+                                }
+                            }
+                        }
+                    }
+                )
             if "fieldValues(first:100)" in query:
                 item_id = command[-1].split("=", 1)[1]
                 nodes = []
