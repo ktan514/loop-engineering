@@ -5,8 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import Any
-from urllib import error as urllib_error
-from urllib import request as urllib_request
+from urllib import error as urllib_error, request as urllib_request
 
 
 MAX_WORKER_HTTP_RESPONSE_BYTES = 2_000_000
