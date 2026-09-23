@@ -1,5 +1,3 @@
-import json
-import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -25,6 +23,10 @@ from loop_engineering.v2_local_llm_coder import (
     LocalLlmCoderImplementerAdapter,
     build_implementer_backend,
 )
+from loop_engineering.v2_local_worker_http import (
+    LocalWorkerHttpFailure,
+    LocalWorkerHttpTimeout,
+)
 
 
 @dataclass(frozen=True)
@@ -38,21 +40,9 @@ class Result:
 
 
 class FakeRunner:
-    def __init__(
-        self,
-        head: str,
-        *,
-        result_mode: str = "pass",
-        process_returncode: int = 0,
-        raise_error: BaseException | None = None,
-    ) -> None:
+    def __init__(self, head: str) -> None:
         self.head = head
-        self.result_mode = result_mode
-        self.process_returncode = process_returncode
-        self.raise_error = raise_error
-        self.worker_calls = 0
-        self.worker_environment: Mapping[str, str] | None = None
-        self.request: dict[str, Any] | None = None
+        self.environments: list[Mapping[str, str] | None] = []
 
     def run(
         self,
@@ -63,42 +53,68 @@ class FakeRunner:
         timeout_seconds: int = 120,
         capture_output: bool = True,
     ) -> Result:
-        del timeout_seconds, capture_output
+        del cwd, timeout_seconds, capture_output
         values = tuple(command)
-        if values[0] == "git":
-            assert values[-2:] == ("rev-parse", "HEAD")
-            return Result(output=self.head)
+        assert values[0] == "git"
+        assert values[-2:] == ("rev-parse", "HEAD")
+        self.environments.append(environment)
+        return Result(output=self.head)
 
-        self.worker_calls += 1
-        self.worker_environment = environment
-        if self.raise_error is not None:
-            raise self.raise_error
 
-        request_path = Path(values[values.index("--request") + 1])
-        result_path = Path(values[values.index("--result") + 1])
-        self.request = json.loads(request_path.read_text(encoding="utf-8"))
-        if self.result_mode == "missing":
-            return Result(self.process_returncode)
-        if self.result_mode == "malformed":
-            result_path.write_text("not-json", encoding="utf-8")
-            return Result(self.process_returncode)
+class FakeWorkerClient:
+    def __init__(self, mode: str = "pass") -> None:
+        self.mode = mode
+        self.calls = 0
+        self.endpoint: str | None = None
+        self.production_name: str | None = None
+        self.request: dict[str, object] | None = None
+        self.timeout_seconds: int | None = None
 
-        payload = worker_result(self.request)
-        if self.result_mode == "identity-mismatch":
+    def __call__(
+        self,
+        endpoint: str,
+        production_name: str,
+        request: dict[str, object],
+        timeout_seconds: int,
+    ) -> dict[str, Any]:
+        self.calls += 1
+        self.endpoint = endpoint
+        self.production_name = production_name
+        self.request = request
+        self.timeout_seconds = timeout_seconds
+        if self.mode == "timeout":
+            raise LocalWorkerHttpTimeout
+        if self.mode == "unavailable":
+            raise LocalWorkerHttpFailure("LOCAL_WORKER_CONNECTION_FAILED")
+        if self.mode == "busy":
+            raise LocalWorkerHttpFailure("LOCAL_WORKER_HTTP_ERROR", 409)
+        if self.mode == "http400":
+            raise LocalWorkerHttpFailure("LOCAL_WORKER_HTTP_ERROR", 400)
+        if self.mode == "malformed":
+            return {"invalid": True}
+
+        payload = worker_result(request)
+        if self.mode == "identity-mismatch":
             payload["request_identity"] = "wrong"
-        result_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        return Result(self.process_returncode)
+        return payload
 
 
-def worker_result(request: Mapping[str, Any]) -> dict[str, Any]:
+def worker_result(request: Mapping[str, object]) -> dict[str, Any]:
     scopes = request["scope_paths"]
     assert isinstance(scopes, list)
     first_scope = scopes[0]
     assert isinstance(first_scope, str)
-    changed_path = first_scope if "." in Path(first_scope).name else first_scope + "/app.py"
+    changed_path = (
+        first_scope
+        if "." in Path(first_scope).name
+        else first_scope + "/app.py"
+    )
+    transition = request["transition"]
+    verification = (
+        []
+        if transition == "DESIGN"
+        else [{"command": "test", "status": "PASS", "summary": "ok"}]
+    )
     return {
         "schema_version": 1,
         "request_identity": request["request_identity"],
@@ -117,9 +133,7 @@ def worker_result(request: Mapping[str, Any]) -> dict[str, Any]:
         },
         "findings": [],
         "changed_paths": [changed_path],
-        "verification_evidence": [
-            {"command": "test", "status": "PASS", "summary": "ok"}
-        ],
+        "verification_evidence": verification,
         "diagnostics": [],
         "session_id": "session-1",
         "artifacts": {
@@ -131,19 +145,21 @@ def worker_result(request: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def local_layout(tmp_path: Path) -> tuple[Path, Path, LocalLlmCoderConfig]:
-    root = tmp_path / "local-llm-coder"
-    script = root / "scripts" / "run-worker.sh"
-    script.parent.mkdir(parents=True)
-    script.write_text("#!/bin/bash\n", encoding="utf-8")
-    script.chmod(0o755)
-    workspace = root / "productions" / "product"
-    workspace.mkdir(parents=True)
-    config = LocalLlmCoderConfig(root.resolve(), "product", "local-main")
-    return root, workspace.resolve(), config
+def local_layout(tmp_path: Path) -> tuple[Path, LocalLlmCoderConfig]:
+    workspace = tmp_path / "product"
+    workspace.mkdir()
+    config = LocalLlmCoderConfig(
+        "http://127.0.0.1:8765",
+        "product",
+        "local-main",
+    )
+    return workspace.resolve(), config
 
 
-def packet(workspace: Path, transition: ImplementerTransition) -> DevelopmentTaskPacket:
+def packet(
+    workspace: Path,
+    transition: ImplementerTransition,
+) -> DevelopmentTaskPacket:
     return DevelopmentTaskPacket(
         packet_identity="packet:1",
         work_identity="work:owner/sample:100",
@@ -179,6 +195,21 @@ def environment() -> dict[str, str]:
     }
 
 
+def adapter(
+    runner: FakeRunner,
+    config: LocalLlmCoderConfig,
+    workspace: Path,
+    worker: FakeWorkerClient,
+) -> LocalLlmCoderImplementerAdapter:
+    return LocalLlmCoderImplementerAdapter(
+        runner,
+        config,
+        workspace,
+        environment(),
+        worker_client=worker,
+    )
+
+
 @pytest.mark.parametrize(
     ("transition", "expected_role"),
     [
@@ -191,16 +222,12 @@ def test_local_backend_design_and_implement(
     transition: ImplementerTransition,
     expected_role: str,
 ) -> None:
-    _root, workspace, config = local_layout(tmp_path)
+    workspace, config = local_layout(tmp_path)
     task = packet(workspace, transition)
     runner = FakeRunner(task.exact_base_sha)
+    worker = FakeWorkerClient()
 
-    result = LocalLlmCoderImplementerAdapter(
-        runner,
-        config,
-        workspace,
-        environment(),
-    ).execute(task)
+    result = adapter(runner, config, workspace, worker).execute(task)
 
     assert result.status is ImplementerStatus.SUCCESS
     assert result.workspace_effect is not None
@@ -211,21 +238,27 @@ def test_local_backend_design_and_implement(
         else "src/app.py"
     )
     assert result.workspace_effect.changed_paths == (expected_changed_path,)
-    assert runner.request is not None
-    assert runner.request["role"] == expected_role
-    assert runner.request["transition"] == transition.value
-    assert runner.request["effect_requirement"] == "MUST_CHANGE"
-    assert runner.request["model_profile"] == "local-main"
+    assert worker.endpoint == "http://127.0.0.1:8765"
+    assert worker.production_name == "product"
+    assert worker.request is not None
+    assert worker.request["role"] == expected_role
+    assert worker.request["transition"] == transition.value
+    assert worker.request["effect_requirement"] == "MUST_CHANGE"
+    assert worker.request["model_profile"] == "local-main"
     expected_scope = (
         ["docs/design.md"]
         if transition is ImplementerTransition.DESIGN
         else ["src", "docs"]
     )
-    assert runner.request["scope_paths"] == expected_scope
+    assert worker.request["scope_paths"] == expected_scope
+    if transition is ImplementerTransition.DESIGN:
+        assert result.workspace_effect.verification_evidence == ()
 
 
-def test_local_backend_repair_binds_change_identity_and_findings(tmp_path: Path) -> None:
-    _root, workspace, config = local_layout(tmp_path)
+def test_local_backend_repair_binds_change_identity_and_findings(
+    tmp_path: Path,
+) -> None:
+    workspace, config = local_layout(tmp_path)
     finding = ImplementerFinding(
         finding_identity="finding:1",
         severity="BLOCKING",
@@ -243,19 +276,17 @@ def test_local_backend_repair_binds_change_identity_and_findings(tmp_path: Path)
         approved_findings=(finding,),
     )
     runner = FakeRunner(task.exact_base_sha)
+    worker = FakeWorkerClient()
 
-    result = LocalLlmCoderImplementerAdapter(
-        runner,
-        config,
-        workspace,
-        environment(),
-    ).execute(task)
+    result = adapter(runner, config, workspace, worker).execute(task)
 
     assert result.status is ImplementerStatus.SUCCESS
-    assert runner.request is not None
-    assert runner.request["role"] == "FIXER"
-    assert runner.request["expected_change_identity"] == task.expected_change_identity
-    assert runner.request["approved_findings"] == [
+    assert worker.request is not None
+    assert worker.request["role"] == "FIXER"
+    assert worker.request["expected_change_identity"] == (
+        task.expected_change_identity
+    )
+    assert worker.request["approved_findings"] == [
         {
             "finding_identity": "finding:1",
             "severity": "BLOCKING",
@@ -273,26 +304,29 @@ def test_local_backend_repair_binds_change_identity_and_findings(tmp_path: Path)
 def test_local_backend_rejects_configured_workspace_mismatch_before_worker(
     tmp_path: Path,
 ) -> None:
-    _root, workspace, config = local_layout(tmp_path)
+    workspace, config = local_layout(tmp_path)
     configured = tmp_path / "configured"
     configured.mkdir()
     task = packet(workspace, ImplementerTransition.IMPLEMENT)
     runner = FakeRunner(task.exact_base_sha)
+    worker = FakeWorkerClient()
 
-    result = LocalLlmCoderImplementerAdapter(
+    result = adapter(
         runner,
         config,
         configured.resolve(),
-        environment(),
+        worker,
     ).execute(task)
 
     assert result.status is ImplementerStatus.BLOCKED
     assert result.detail == "LOCAL_WORKSPACE_IDENTITY_MISMATCH"
-    assert runner.worker_calls == 0
+    assert worker.calls == 0
 
 
-def test_local_backend_rejects_workspace_mismatch_before_worker(tmp_path: Path) -> None:
-    _root, workspace, config = local_layout(tmp_path)
+def test_local_backend_rejects_workspace_mismatch_before_worker(
+    tmp_path: Path,
+) -> None:
+    workspace, config = local_layout(tmp_path)
     other = tmp_path / "other"
     other.mkdir()
     task = replace(
@@ -300,17 +334,13 @@ def test_local_backend_rejects_workspace_mismatch_before_worker(tmp_path: Path) 
         workspace_canonical_path=other.resolve(),
     )
     runner = FakeRunner(task.exact_base_sha)
+    worker = FakeWorkerClient()
 
-    result = LocalLlmCoderImplementerAdapter(
-        runner,
-        config,
-        workspace,
-        environment(),
-    ).execute(task)
+    result = adapter(runner, config, workspace, worker).execute(task)
 
     assert result.status is ImplementerStatus.BLOCKED
     assert result.detail == "LOCAL_WORKSPACE_IDENTITY_MISMATCH"
-    assert runner.worker_calls == 0
+    assert worker.calls == 0
 
 
 @pytest.mark.parametrize("mode", ["malformed", "identity-mismatch"])
@@ -318,35 +348,24 @@ def test_local_backend_rejects_malformed_or_mismatched_result(
     tmp_path: Path,
     mode: str,
 ) -> None:
-    _root, workspace, config = local_layout(tmp_path)
+    workspace, config = local_layout(tmp_path)
     task = packet(workspace, ImplementerTransition.IMPLEMENT)
-    runner = FakeRunner(task.exact_base_sha, result_mode=mode)
+    runner = FakeRunner(task.exact_base_sha)
+    worker = FakeWorkerClient(mode)
 
-    result = LocalLlmCoderImplementerAdapter(
-        runner,
-        config,
-        workspace,
-        environment(),
-    ).execute(task)
+    result = adapter(runner, config, workspace, worker).execute(task)
 
     assert result.status is ImplementerStatus.FAILED
     assert result.detail == "LOCAL_WORKER_RESULT_MALFORMED"
 
 
 def test_local_backend_timeout_is_incomplete(tmp_path: Path) -> None:
-    _root, workspace, config = local_layout(tmp_path)
+    workspace, config = local_layout(tmp_path)
     task = packet(workspace, ImplementerTransition.IMPLEMENT)
-    runner = FakeRunner(
-        task.exact_base_sha,
-        raise_error=subprocess.TimeoutExpired("worker", 1),
-    )
+    runner = FakeRunner(task.exact_base_sha)
+    worker = FakeWorkerClient("timeout")
 
-    result = LocalLlmCoderImplementerAdapter(
-        runner,
-        config,
-        workspace,
-        environment(),
-    ).execute(task)
+    result = adapter(runner, config, workspace, worker).execute(task)
 
     assert result.status is ImplementerStatus.INCOMPLETE
     assert result.detail == "LOCAL_WORKER_TIMEOUT"
@@ -354,77 +373,67 @@ def test_local_backend_timeout_is_incomplete(tmp_path: Path) -> None:
 
 
 def test_local_backend_provider_unavailable_is_failed(tmp_path: Path) -> None:
-    _root, workspace, config = local_layout(tmp_path)
+    workspace, config = local_layout(tmp_path)
     task = packet(workspace, ImplementerTransition.IMPLEMENT)
-    runner = FakeRunner(task.exact_base_sha, raise_error=OSError("unavailable"))
+    runner = FakeRunner(task.exact_base_sha)
+    worker = FakeWorkerClient("unavailable")
 
-    result = LocalLlmCoderImplementerAdapter(
-        runner,
-        config,
-        workspace,
-        environment(),
-    ).execute(task)
+    result = adapter(runner, config, workspace, worker).execute(task)
 
     assert result.status is ImplementerStatus.FAILED
-    assert result.detail == "LOCAL_WORKER_UNAVAILABLE"
+    assert result.detail == "LOCAL_WORKER_CONNECTION_FAILED"
+    assert result.failure_kind == "PROVIDER_UNAVAILABLE"
 
 
-def test_process_exit_zero_without_result_is_not_success(tmp_path: Path) -> None:
-    _root, workspace, config = local_layout(tmp_path)
+def test_worker_busy_is_incomplete(tmp_path: Path) -> None:
+    workspace, config = local_layout(tmp_path)
     task = packet(workspace, ImplementerTransition.IMPLEMENT)
-    runner = FakeRunner(task.exact_base_sha, result_mode="missing")
+    runner = FakeRunner(task.exact_base_sha)
+    worker = FakeWorkerClient("busy")
 
-    result = LocalLlmCoderImplementerAdapter(
-        runner,
-        config,
-        workspace,
-        environment(),
-    ).execute(task)
+    result = adapter(runner, config, workspace, worker).execute(task)
+
+    assert result.status is ImplementerStatus.INCOMPLETE
+    assert result.detail == "LOCAL_WORKER_BUSY"
+
+
+def test_http_client_error_cannot_promote_success(tmp_path: Path) -> None:
+    workspace, config = local_layout(tmp_path)
+    task = packet(workspace, ImplementerTransition.IMPLEMENT)
+    runner = FakeRunner(task.exact_base_sha)
+    worker = FakeWorkerClient("http400")
+
+    result = adapter(runner, config, workspace, worker).execute(task)
 
     assert result.status is ImplementerStatus.FAILED
-    assert result.detail == "LOCAL_WORKER_RESULT_MISSING"
-
-
-def test_nonzero_process_cannot_promote_pass_result(tmp_path: Path) -> None:
-    _root, workspace, config = local_layout(tmp_path)
-    task = packet(workspace, ImplementerTransition.IMPLEMENT)
-    runner = FakeRunner(task.exact_base_sha, process_returncode=7)
-
-    result = LocalLlmCoderImplementerAdapter(
-        runner,
-        config,
-        workspace,
-        environment(),
-    ).execute(task)
-
-    assert result.status is ImplementerStatus.FAILED
-    assert result.detail == "LOCAL_WORKER_PROCESS_RESULT_CONFLICT"
+    assert result.failure_kind == "RUNTIME_PREFLIGHT"
 
 
 def test_local_backend_strips_control_plane_secrets(tmp_path: Path) -> None:
-    _root, workspace, config = local_layout(tmp_path)
+    workspace, config = local_layout(tmp_path)
     task = packet(workspace, ImplementerTransition.IMPLEMENT)
     runner = FakeRunner(task.exact_base_sha)
+    worker = FakeWorkerClient()
 
-    result = LocalLlmCoderImplementerAdapter(
-        runner,
-        config,
-        workspace,
-        environment(),
-    ).execute(task)
+    result = adapter(runner, config, workspace, worker).execute(task)
 
     assert result.status is ImplementerStatus.SUCCESS
-    assert runner.worker_environment == {
+    assert worker.request is not None
+    request_text = __import__("json").dumps(
+        worker.request,
+        ensure_ascii=False,
+    )
+    assert "secret-gh" not in request_text
+    assert "secret-openai" not in request_text
+    assert "secret-db" not in request_text
+    assert "secret-socket" not in request_text
+    assert runner.environments
+    assert runner.environments[-1] == {
         "PATH": "/usr/bin",
         "HOME": "/tmp/home",
         "PYENV_ROOT": "/tmp/pyenv",
         "LOCAL_LLM_CODER_PROFILE_CONFIG": "/tmp/local-profiles.json",
     }
-    request_text = json.dumps(runner.request, ensure_ascii=False)
-    assert "secret-gh" not in request_text
-    assert "secret-openai" not in request_text
-    assert "secret-db" not in request_text
-    assert "secret-socket" not in request_text
 
 
 def settings(
@@ -433,11 +442,7 @@ def settings(
     provider: str,
     local: LocalLlmCoderConfig | None,
 ) -> LoopEngineeringSettings:
-    workspace = (
-        local.active_production_path
-        if local is not None
-        else (tmp_path / "workspace").resolve()
-    )
+    workspace = (tmp_path / "workspace").resolve()
     return LoopEngineeringSettings(
         config_path=(tmp_path / "loop-engineering.ini").resolve(),
         project_key="sample",
@@ -454,7 +459,11 @@ def settings(
             reviewer_provider="openai",
             reviewer_model="reviewer",
             reviewer_api_base="https://api.openai.com/v1",
-            implementer_profile="local-main" if provider == "local-llm-coder" else None,
+            implementer_profile=(
+                "local-main"
+                if provider == "local-llm-coder"
+                else None
+            ),
         ),
         secrets=SecretReferenceConfig(
             github_token_env="GH_TOKEN",
@@ -476,8 +485,16 @@ def test_backend_factory_keeps_codex_available(tmp_path: Path) -> None:
 
 
 def test_backend_factory_selects_local_llm_coder(tmp_path: Path) -> None:
-    _root, _workspace, local = local_layout(tmp_path)
-    item = settings(tmp_path, provider="local-llm-coder", local=local)
+    local = LocalLlmCoderConfig(
+        "http://127.0.0.1:8765",
+        "product",
+        "local-main",
+    )
+    item = settings(
+        tmp_path,
+        provider="local-llm-coder",
+        local=local,
+    )
     runner = FakeRunner("b" * 40)
 
     backend = build_implementer_backend(item, runner, environment())
@@ -486,7 +503,7 @@ def test_backend_factory_selects_local_llm_coder(tmp_path: Path) -> None:
 
 
 def test_settings_load_local_backend_and_profile(tmp_path: Path) -> None:
-    root, workspace, local = local_layout(tmp_path)
+    workspace = tmp_path / "product"
     config_path = tmp_path / "loop-engineering.ini"
     config_path.write_text(
         "[project]\n"
@@ -502,7 +519,7 @@ def test_settings_load_local_backend_and_profile(tmp_path: Path) -> None:
         "reviewer_provider = openai\n"
         "reviewer_model = reviewer\n"
         "\n[local_llm_coder]\n"
-        f"root = {root}\n"
+        "endpoint = http://127.0.0.1:8765\n"
         "production_name = product\n"
         "\n[credentials]\n"
         "\n[operational_store]\n"
@@ -516,16 +533,25 @@ def test_settings_load_local_backend_and_profile(tmp_path: Path) -> None:
         config_path=config_path,
     )
 
-    assert loaded.local_llm_coder == local
+    assert loaded.local_llm_coder == LocalLlmCoderConfig(
+        "http://127.0.0.1:8765",
+        "product",
+        "local-main",
+    )
     runtime = loaded.runtime_environment({})
     assert runtime["LOOP_IMPLEMENTER_PROFILE"] == "local-main"
-    assert runtime["LOOP_LOCAL_LLM_CODER_ROOT"] == str(local.root)
+    assert runtime["LOOP_LOCAL_LLM_CODER_ENDPOINT"] == (
+        "http://127.0.0.1:8765"
+    )
+    assert "LOOP_LOCAL_LLM_CODER_ROOT" not in runtime
     assert runtime["LOOP_LOCAL_LLM_CODER_PRODUCTION"] == "product"
     assert runtime["LOOP_LOCAL_LLM_CODER_MODEL_PROFILE"] == "local-main"
 
 
-def test_local_config_falls_back_to_implementer_model(tmp_path: Path) -> None:
-    root, workspace, _local = local_layout(tmp_path)
+def test_local_config_falls_back_to_implementer_model(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "product"
     config_path = tmp_path / "loop-engineering.ini"
     config_path.write_text(
         "[project]\n"
@@ -539,7 +565,7 @@ def test_local_config_falls_back_to_implementer_model(tmp_path: Path) -> None:
         "implementer_model = compatibility-profile\n"
         "reviewer_model = reviewer\n"
         "\n[local_llm_coder]\n"
-        f"root = {root}\n"
+        "endpoint = http://localhost:8765\n"
         "production_name = product\n"
         "\n[credentials]\n"
         "\n[operational_store]\n"
@@ -547,7 +573,31 @@ def test_local_config_falls_back_to_implementer_model(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    loaded = LoopEngineeringSettings.load(tmp_path, {}, config_path=config_path)
+    loaded = LoopEngineeringSettings.load(
+        tmp_path,
+        {},
+        config_path=config_path,
+    )
 
     assert loaded.local_llm_coder is not None
-    assert loaded.local_llm_coder.model_profile == "compatibility-profile"
+    assert loaded.local_llm_coder.model_profile == (
+        "compatibility-profile"
+    )
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    (
+        "https://127.0.0.1:8765",
+        "http://0.0.0.0:8765",
+        "http://192.168.1.10:8765",
+        "http://127.0.0.1:8765/path",
+        "http://user@127.0.0.1:8765",
+        "http://127.0.0.1",
+    ),
+)
+def test_local_config_rejects_non_loopback_or_ambiguous_endpoint(
+    endpoint: str,
+) -> None:
+    with pytest.raises(ValueError, match="local_llm_coder.endpoint"):
+        LocalLlmCoderConfig(endpoint, "product", "local-main")
