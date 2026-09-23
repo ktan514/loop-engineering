@@ -420,6 +420,8 @@ class LoopEngineeringSettings:
             value = values.get(configured_name)
             if value:
                 values[canonical_name] = value
+            else:
+                values.pop(canonical_name, None)
 
         engine = self.engine
         values.update(
