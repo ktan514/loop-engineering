@@ -6,11 +6,11 @@ import hashlib
 import json
 import re
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from typing import Protocol
+from typing import Any, Protocol
 
 from .config import LocalLlmCoderConfig
 from .v2_local_worker_http import (
@@ -688,7 +688,10 @@ class LocalLlmCoderReviewerAdapter:
         model_profile: str,
         *,
         timeout_seconds: int = 1800,
-        worker_client: object = post_worker_request,
+        worker_client: Callable[
+            [str, str, dict[str, object], int],
+            dict[str, Any],
+        ] = post_worker_request,
     ) -> None:
         if not model_profile.strip():
             raise ValueError("LOCAL_REVIEWER_PROFILE_REQUIRED")
