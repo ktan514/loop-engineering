@@ -68,7 +68,7 @@ def policy(
         provider="openai",
         model=f"reviewer-{level}",
         api_base="https://api.example.test/v1",
-        credential_env="REVIEW_KEY",
+        credential_env="OPENAI_API_KEY",
         required=required,
         timeout_seconds=30,
         context_policy="default",
@@ -342,7 +342,7 @@ def test_openai_compatible_adapter_keeps_secret_out_of_payload() -> None:
     transport = FakeTransport(item)
     reviewer = OpenAICompatibleExternalReviewer(
         runner,
-        {"REVIEW_KEY": "secret-review-key"},
+        {"OPENAI_API_KEY": "secret-review-key"},
         transport,
     )
 
