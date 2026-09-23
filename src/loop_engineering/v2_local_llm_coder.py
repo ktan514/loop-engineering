@@ -138,6 +138,7 @@ class LocalLlmCoderImplementerAdapter:
         environment: Mapping[str, str],
         *,
         timeout_seconds: int = 1800,
+        worker_client: Any = post_worker_request,
     ) -> None:
         if timeout_seconds < 1 or timeout_seconds > 7200:
             raise ValueError("LOCAL_LLM_CODER_TIMEOUT_INVALID")
@@ -146,6 +147,7 @@ class LocalLlmCoderImplementerAdapter:
         self._workspace = workspace_path.resolve(strict=False)
         self._environment = _sanitized_environment(environment)
         self._timeout_seconds = timeout_seconds
+        self._worker_client = worker_client
 
     def execute(self, packet: DevelopmentTaskPacket) -> ImplementerResult:
         validation = validate_development_task_packet(packet)
@@ -169,7 +171,7 @@ class LocalLlmCoderImplementerAdapter:
         request = _request_payload(packet, self._config.model_profile)
         request_identity = _required_string(request["request_identity"])
         try:
-            response = post_worker_request(
+            response = self._worker_client(
                 self._config.endpoint,
                 self._config.production_name,
                 request,
