@@ -36,7 +36,7 @@ def _write_config(path: Path, workspace: str, *, github_env: str = "MY_GITHUB_TO
                 "reviewer_provider = openai",
                 "reviewer_model = gpt-5.6-terra",
                 "reviewer_api_base = https://api.openai.com/v1",
-                "reviewer_api_key_env = MY_REVIEWER_KEY",
+                "reviewer_api_key_env = OPENAI_API_KEY",
                 "",
                 "[credentials]",
                 f"github_token_env = {github_env}",
@@ -66,7 +66,7 @@ def test_settings_load_workspace_models_and_secret_environment_names(tmp_path: P
     assert settings.engine.mission_issue == 100
     assert settings.models.reviewer_model == "gpt-5.6-terra"
     assert settings.secrets.github_token_env == "MY_GITHUB_TOKEN"
-    assert settings.secrets.reviewer_api_key_env == "MY_REVIEWER_KEY"
+    assert settings.secrets.reviewer_api_key_env == "OPENAI_API_KEY"
 
 
 def test_runtime_environment_maps_secret_values_without_putting_them_in_config(
@@ -79,12 +79,11 @@ def test_runtime_environment_maps_secret_values_without_putting_them_in_config(
     values = settings.runtime_environment(
         {
             "MY_GITHUB_TOKEN": "github-secret",
-            "MY_REVIEWER_KEY": "reviewer-secret",
+            "OPENAI_API_KEY": "reviewer-secret",
             "MY_DATABASE_DSN": "postgresql://secret",
             "MY_REVIEWER_SOCKET": "/tmp/reviewer.sock",
             "GH_TOKEN": "stale-github-secret",
-            "OPENAI_API_KEY": "stale-reviewer-secret",
-            "LOOP_POSTGRES_DSN": "postgresql://stale",
+                        "LOOP_POSTGRES_DSN": "postgresql://stale",
             "LOOP_TRUSTED_REVIEWER_SOCKET": "/tmp/stale.sock",
         }
     )
@@ -108,8 +107,7 @@ def test_missing_configured_secret_env_does_not_fall_back_to_canonical_name(
     values = settings.runtime_environment(
         {
             "GH_TOKEN": "stale-github-secret",
-            "OPENAI_API_KEY": "stale-reviewer-secret",
-            "LOOP_POSTGRES_DSN": "postgresql://stale",
+                        "LOOP_POSTGRES_DSN": "postgresql://stale",
             "LOOP_TRUSTED_REVIEWER_SOCKET": "/tmp/stale.sock",
         }
     )
@@ -134,7 +132,7 @@ def test_reviewer_single_config_normalizes_to_level_one(tmp_path: Path) -> None:
     assert level.level == 1
     assert level.provider == "openai"
     assert level.model == "gpt-5.6-terra"
-    assert level.credential_env == "MY_REVIEWER_KEY"
+    assert level.credential_env == "OPENAI_API_KEY"
     assert level.passes_required == 1
 
 
@@ -148,14 +146,14 @@ def test_multiple_review_levels_and_fresh_pass_count_load_from_config(
             "\n[review.level.1]\n"
             "provider = openai\n"
             "model = low-reviewer\n"
-            "credential_env = LOW_REVIEW_KEY\n"
+            "credential_env = OPENAI_API_KEY\n"
             "required = true\n"
             "passes_required = 2\n"
             "escalation_policy = NEXT_LEVEL\n"
             "\n[review.level.2]\n"
             "provider = openai\n"
             "model = high-reviewer\n"
-            "credential_env = HIGH_REVIEW_KEY\n"
+            "credential_env = OPENAI_API_KEY\n"
             "required = true\n"
             "passes_required = 2\n"
             "escalation_policy = HUMAN\n"
@@ -167,8 +165,8 @@ def test_multiple_review_levels_and_fresh_pass_count_load_from_config(
         (1, "low-reviewer", 2),
         (2, "high-reviewer", 2),
     ]
-    assert settings.review_levels[0].credential_env == "LOW_REVIEW_KEY"
-    assert settings.review_levels[1].credential_env == "HIGH_REVIEW_KEY"
+    assert settings.review_levels[0].credential_env == "OPENAI_API_KEY"
+    assert settings.review_levels[1].credential_env == "OPENAI_API_KEY"
 
 
 def test_invalid_review_level_pass_count_fails_closed(tmp_path: Path) -> None:
@@ -234,12 +232,26 @@ def test_verification_command_path_traversal_fails_closed(tmp_path: Path) -> Non
         LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
 
 
+def test_nonstandard_openai_api_key_environment_is_rejected(tmp_path: Path) -> None:
+    config = tmp_path / "loop-engineering.ini"
+    workspace = tmp_path / "product"
+    _write_config(config, str(workspace))
+    text = config.read_text(encoding="utf-8").replace(
+        "reviewer_api_key_env = OPENAI_API_KEY\n",
+        "reviewer_api_key_env = MY_REVIEWER_KEY\n",
+    )
+    config.write_text(text, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+        LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+
+
 def test_default_reviewer_api_key_environment_is_openai_api_key(tmp_path: Path) -> None:
     config = tmp_path / "loop-engineering.ini"
     workspace = tmp_path / "product"
     _write_config(config, str(workspace))
     text = config.read_text(encoding="utf-8").replace(
-        "reviewer_api_key_env = MY_REVIEWER_KEY\n",
+        "reviewer_api_key_env = OPENAI_API_KEY\n",
         "",
     )
     config.write_text(text, encoding="utf-8")
