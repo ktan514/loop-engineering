@@ -285,11 +285,13 @@ class GhMissionPort:
         return _string(readback.get("state")) == "closed"
 
     def publish_checkpoint(self, body: str) -> bool:
+        mission_issue = self.config.mission_issue
+        if mission_issue is None:
+            raise RuntimeError("LEGACY_MISSION_ISSUE_REQUIRED")
         result = self._run_gh(
             (
                 "api",
-                f"repos/{self.config.repository}/issues/"
-                f"{self.config.mission_issue}/comments",
+                f"repos/{self.config.repository}/issues/{mission_issue}/comments",
                 "-f",
                 f"body={body}",
             )
@@ -297,7 +299,10 @@ class GhMissionPort:
         return result.succeeded
 
     def _checkpoint_candidate(self) -> tuple[int, int | None, str | None, int] | None:
-        comments = self._issue_comments(self.config.mission_issue)
+        mission_issue = self.config.mission_issue
+        if mission_issue is None:
+            raise RuntimeError("LEGACY_MISSION_ISSUE_REQUIRED")
+        comments = self._issue_comments(mission_issue)
         for comment in reversed(comments):
             body = _string(comment.get("body"))
             if body is None or "Mission Checkpoint" not in body:
