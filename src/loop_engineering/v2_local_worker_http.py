@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any
 from urllib import error, request
 
-
 MAX_WORKER_HTTP_RESPONSE_BYTES = 2_000_000
 
 
