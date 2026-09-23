@@ -489,7 +489,11 @@ def _parse_worker_result(
         raise ValueError("MUST_CHANGE effect missing")
 
     verification = _verification_tuple(value.get("verification_evidence"))
-    if status == "PASS" and packet.acceptance_checks:
+    if (
+        status == "PASS"
+        and packet.transition is not ImplementerTransition.DESIGN
+        and packet.acceptance_checks
+    ):
         if not verification or any(item.status != "PASS" for item in verification):
             raise ValueError("PASS verification invalid")
 
