@@ -213,27 +213,37 @@ implementer_provider = local-llm-coder
 implementer_profile = <profile>
 
 [local_llm_coder]
-root = <absolute local-llm-coder root>
+endpoint = http://127.0.0.1:8765
 production_name = <production directory name>
 ```
 
-設定loaderはこれを`local_llm_coder_root` / `production_name` / `model_profile`のBackend設定へ正規化する。移行期間は既存`implementer_model`を`implementer_profile`未指定時の互換入力として扱う。
+設定loaderはこれを`endpoint` / `production_name` / `model_profile`のBackend設定へ正規化する。`local_llm_coder.root`はRepository間transport契約から削除し、Loop Engineeringはlocal-llm-coderのinstallation path、`scripts/run-worker.sh`、Pipenv環境を知らない。移行期間は既存`implementer_model`を`implementer_profile`未指定時の互換入力として扱う。
 
-Adapterは次を照合する。
+`endpoint`はlocalhost HTTPだけを許可する。通常値は`http://127.0.0.1:<port>`とし、non-loopback host、userinfo、query、fragmentをfail-closedで拒否する。
+
+Adapterは次の二重確認を維持する。
 
 ```text
-Loop Engineering workspace_path
-==
-resolve(local_llm_coder_root / productions / production_name)
-==
-local-llm-coder preflightのActive Production
+Loop Engineering local workspace readback
+    workspace_path / exact HEAD
+            ↓
+POST /v1/worker
+    production_name
+    request.workspace_canonical_path
+            ↓
+local-llm-coder server
+    production_nameからActive Productionを解決
+            ↓
+Worker preflight
+    request.workspace_canonical_path
+      == Active Production canonical path
 ```
 
-不一致ならWorkerを起動せずfail-closedする。
+不一致ならWorker coreが実作業前にfail-closedする。
 
-これにより、Loop EngineeringのGit readback / lineage / exact HEADと、local-llm-coderが実際に編集・レビューするWorkspaceが同一になる。
+これにより、Loop EngineeringのGit readback / lineage / exact HEADと、local-llm-coderが実際に編集・レビューするWorkspaceが同一であるinvariantを維持しつつ、Backend repositoryの配置path依存を除去する。
 
-将来local-llm-coderが任意external Workspace registrationを正式に持つ場合はこのPort実装を交換できるが、canonical Workspace identity一致のinvariantは維持する。
+Product Workspace自体のcanonical pathは同一host上の共有Work Plane identityとして意図的に検証する。これはlocal-llm-coder Control Plane rootへの依存とは別の安全契約である。
 
 ## 4. Completion Contract
 
@@ -463,37 +473,38 @@ Loop Engineeringからの通常呼出しではTUI操作を前提にしない。
 
 Automation backendは標準出力の自然文解析をControl Plane契約にしない。結果はJSON等のversioned schemaで返す。
 
-### 8.1 Automation CLI
+### 8.1 Automation Worker HTTP API
 
-初期Adapter契約はfile-based request/resultとする。標準出力はdiagnostic専用で、machine result Authorityにしない。
+Repository間の標準Adapter契約はlocalhost TCP/HTTPとする。Loop Engineeringはlocal-llm-coderのshell scriptやrepository pathを直接実行しない。
 
-概念CLI:
-
-```text
-./scripts/run-worker.sh <production-name> \
-  --request <request.json> \
-  --result <result.json>
-```
-
-Shell wrapperは引数検証とPython entrypoint呼出しだけに限定し、Worker制御実装は`src/`配下のPythonへ置く。
-
-request/resultはversioned schemaを持ち、atomic write後にresult pathをreadbackする。
-
-最低限:
+health:
 
 ```text
-schema_version
-request_identity
-task_packet_identity
-role
-status
-completion
-diagnostics
+GET <endpoint>/v1/health
 ```
 
-result file不存在、不正JSON、schema不一致、identity不一致、途中書込は`INCOMPLETE`または`FAILED`として扱い、PASSにしない。
+Worker:
 
-OpenCode固有command lineはAdapter内部へ閉じ込める。
+```text
+POST <endpoint>/v1/worker
+Content-Type: application/json
+
+{
+  "api_version": 1,
+  "production_name": "<production-name>",
+  "request": { <LocalWorkerRequest v1> }
+}
+```
+
+有効なWorker requestはHTTP 200で`LocalWorkerResult v1`を返す。Workerの`PASS / FINDINGS / INCOMPLETE / BLOCKED / FAILED`はHTTP statusへ写像せずresult内statusをAuthorityとする。HTTP 4xx/5xxはtransport / protocol failureだけに使用する。
+
+Loop EngineeringはHTTP response JSONをsize上限、schema_version、request identity、TaskPacket identity、role、input target、result target、Completion Contractで再検証する。HTTP 200だけでSUCCESSへ昇格しない。
+
+connection failure / timeout / non-200 / malformed JSONはtyped provider failureへ正規化し、Worker PASSへ読み替えない。
+
+file-based `scripts/run-worker.sh`はlocal-llm-coder内部のcompatibility/debug入口として残してよいが、Loop Engineering通常経路では使用しない。
+
+OpenCode固有command line、local-llm-coderのPipenv、Control Plane filesystem pathはHTTP server内部へ閉じ込める。
 
 ## 9. 状態永続化とResume
 
