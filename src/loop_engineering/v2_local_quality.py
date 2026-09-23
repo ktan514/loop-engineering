@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import subprocess
-import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -15,6 +13,11 @@ from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 from .config import LocalLlmCoderConfig
+from .v2_local_worker_http import (
+    LocalWorkerHttpFailure,
+    LocalWorkerHttpTimeout,
+    post_worker_request,
+)
 from .v2_implementer import (
     DevelopmentTaskPacket,
     ImplementerFinding,
@@ -696,99 +699,63 @@ class LocalLlmCoderReviewerAdapter:
         self._environment = _sanitized_environment(environment)
         self._model_profile = model_profile
         self._timeout_seconds = timeout_seconds
-        self._script = config.root.resolve(strict=False) / "scripts" / "run-worker.sh"
 
     def review(self, context: LocalQualityContext) -> LocalReviewExecutionResult:
-        if (
-            context.workspace_canonical_path.resolve(strict=False) != self._workspace
-            or self._workspace != self._config.active_production_path
-        ):
+        if context.workspace_canonical_path.resolve(strict=False) != self._workspace:
             return _review_failure(
                 LocalReviewStatus.BLOCKED,
                 "LOCAL_REVIEW_WORKSPACE_IDENTITY_MISMATCH",
                 "TARGET_PREFLIGHT",
-            )
-        if not self._script.is_file() or not os.access(self._script, os.X_OK):
-            return _review_failure(
-                LocalReviewStatus.FAILED,
-                "LOCAL_REVIEWER_UNAVAILABLE",
-                "CONFIGURATION",
             )
 
         payload = _review_request_payload(context, self._model_profile)
         request_identity = _required_string(payload["request_identity"])
         task_identity = _required_string(payload["task_packet_identity"])
         try:
-            with tempfile.TemporaryDirectory(prefix="loop-local-review-") as temporary:
-                root = Path(temporary)
-                request_path = root / "request.json"
-                result_path = root / "result.json"
-                request_path.write_text(
-                    json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-                    encoding="utf-8",
+            response = post_worker_request(
+                self._config.endpoint,
+                self._config.production_name,
+                payload,
+                self._timeout_seconds,
+            )
+        except LocalWorkerHttpTimeout:
+            return _review_failure(
+                LocalReviewStatus.INCOMPLETE,
+                request_identity,
+                "PROCESS_TIMEOUT",
+            )
+        except LocalWorkerHttpFailure as exc:
+            if exc.http_status == 409:
+                return _review_failure(
+                    LocalReviewStatus.INCOMPLETE,
+                    request_identity,
+                    "PROCESS_EXIT",
                 )
-                try:
-                    process = self._runner.run(
-                        (
-                            str(self._script),
-                            self._config.production_name,
-                            "--request",
-                            str(request_path),
-                            "--result",
-                            str(result_path),
-                        ),
-                        cwd=self._config.root,
-                        environment=self._environment,
-                        timeout_seconds=self._timeout_seconds,
-                    )
-                except subprocess.TimeoutExpired:
-                    return _review_failure(
-                        LocalReviewStatus.INCOMPLETE,
-                        request_identity,
-                        "PROCESS_TIMEOUT",
-                    )
-                except (OSError, subprocess.SubprocessError):
-                    return _review_failure(
-                        LocalReviewStatus.FAILED,
-                        request_identity,
-                        "PROCESS_EXIT",
-                    )
-                if not result_path.is_file():
-                    return _review_failure(
-                        LocalReviewStatus.FAILED,
-                        request_identity,
-                        "PROCESS_EXIT",
-                    )
-                try:
-                    result = _parse_review_result(
-                        result_path,
-                        context=context,
-                        request_identity=request_identity,
-                        task_identity=task_identity,
-                    )
-                except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
-                    return _review_failure(
-                        LocalReviewStatus.FAILED,
-                        request_identity,
-                        "MALFORMED_AGENT_RESULT",
-                    )
-        except OSError:
+            failure_kind = (
+                "RUNTIME_PREFLIGHT"
+                if exc.http_status is not None
+                and 400 <= exc.http_status < 500
+                else "PROCESS_EXIT"
+            )
             return _review_failure(
                 LocalReviewStatus.FAILED,
                 request_identity,
-                "RUNTIME_PREFLIGHT",
+                failure_kind,
             )
 
-        if process.returncode != 0 and result.status in {
-            LocalReviewStatus.PASS,
-            LocalReviewStatus.FINDINGS,
-        }:
+        try:
+            return _parse_review_result(
+                response,
+                context=context,
+                request_identity=request_identity,
+                task_identity=task_identity,
+            )
+        except ValueError:
             return _review_failure(
                 LocalReviewStatus.FAILED,
                 request_identity,
-                "PROCESS_EXIT",
+                "MALFORMED_AGENT_RESULT",
             )
-        return result
 
 
 class LocalQualityCoordinator:
@@ -1231,13 +1198,12 @@ def _review_request_payload(
 
 
 def _parse_review_result(
-    path: Path,
+    raw: object,
     *,
     context: LocalQualityContext,
     request_identity: str,
     task_identity: str,
 ) -> LocalReviewExecutionResult:
-    raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict) or set(raw) != _WORKER_RESULT_FIELDS:
         raise ValueError("review result fields invalid")
     if raw.get("schema_version") != 1:
