@@ -431,7 +431,6 @@ def test_local_backend_strips_control_plane_secrets(tmp_path: Path) -> None:
         "PATH": "/usr/bin",
         "HOME": "/tmp/home",
         "PYENV_ROOT": "/tmp/pyenv",
-        "LOCAL_LLM_CODER_PROFILE_CONFIG": "/tmp/local-profiles.json",
     }
 
 
