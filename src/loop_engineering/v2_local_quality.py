@@ -114,7 +114,6 @@ _BASE_ENV_NAMES = frozenset(
         "COLORTERM",
         "PYENV_ROOT",
         "PYENV_VERSION",
-        "LOCAL_LLM_CODER_PROFILE_CONFIG",
     }
 )
 
