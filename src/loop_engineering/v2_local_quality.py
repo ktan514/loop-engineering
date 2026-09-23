@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
@@ -13,17 +14,17 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
 from .config import LocalLlmCoderConfig
-from .v2_local_worker_http import (
-    LocalWorkerHttpFailure,
-    LocalWorkerHttpTimeout,
-    post_worker_request,
-)
 from .v2_implementer import (
     DevelopmentTaskPacket,
     ImplementerFinding,
     ImplementerStatus,
     ImplementerTransition,
     V2ImplementerPort,
+)
+from .v2_local_worker_http import (
+    LocalWorkerHttpFailure,
+    LocalWorkerHttpTimeout,
+    post_worker_request,
 )
 
 _SHA_RE = re.compile(r"[0-9a-f]{40}")
