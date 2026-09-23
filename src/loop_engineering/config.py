@@ -194,6 +194,13 @@ class ReviewLevelConfig:
             if not value.strip():
                 raise ValueError(f"review level {name}を空文字にはできません")
         _validate_env_name("review level credential_env", self.credential_env)
+        if (
+            self.provider.strip().lower() == "openai"
+            and self.credential_env != "OPENAI_API_KEY"
+        ):
+            raise ValueError(
+                "OpenAI review levelのcredential_envはOPENAI_API_KEYで指定してください"
+            )
         if self.timeout_seconds < 1 or self.timeout_seconds > 7200:
             raise ValueError("review level timeout_secondsは1..7200で指定してください")
         if self.passes_required < 1 or self.passes_required > 8:
@@ -371,6 +378,10 @@ class LoopEngineeringSettings:
             models.get("reviewer_api_key_env", "OPENAI_API_KEY").strip()
             or "OPENAI_API_KEY"
         )
+        if reviewer_api_key_env != "OPENAI_API_KEY":
+            raise ValueError(
+                "reviewer_api_key_envはOPENAI_API_KEYで指定してください"
+            )
         review_levels = _review_levels_from_parser(
             parser,
             model_config,
