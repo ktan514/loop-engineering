@@ -1,5 +1,6 @@
 import json
 import threading
+from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -35,7 +36,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def worker_endpoint() -> str:
+def worker_endpoint() -> Iterator[str]:
     Handler.response_status = 200
     Handler.response_payload = {"schema_version": 1}
     Handler.response_content_type = "application/json"
