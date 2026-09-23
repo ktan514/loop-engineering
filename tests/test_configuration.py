@@ -82,6 +82,10 @@ def test_runtime_environment_maps_secret_values_without_putting_them_in_config(
             "MY_REVIEWER_KEY": "reviewer-secret",
             "MY_DATABASE_DSN": "postgresql://secret",
             "MY_REVIEWER_SOCKET": "/tmp/reviewer.sock",
+            "GH_TOKEN": "stale-github-secret",
+            "OPENAI_API_KEY": "stale-reviewer-secret",
+            "LOOP_POSTGRES_DSN": "postgresql://stale",
+            "LOOP_TRUSTED_REVIEWER_SOCKET": "/tmp/stale.sock",
         }
     )
 
@@ -92,6 +96,28 @@ def test_runtime_environment_maps_secret_values_without_putting_them_in_config(
     assert values["LOOP_REPOSITORY"] == "owner/product"
     assert values["LOOP_PROJECT_NUMBER"] == "9"
     assert values["LOOP_REVIEWER_MODEL"] == "gpt-5.6-terra"
+
+
+def test_missing_configured_secret_env_does_not_fall_back_to_canonical_name(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "loop-engineering.ini"
+    _write_config(config, str(tmp_path / "product"))
+    settings = LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+
+    values = settings.runtime_environment(
+        {
+            "GH_TOKEN": "stale-github-secret",
+            "OPENAI_API_KEY": "stale-reviewer-secret",
+            "LOOP_POSTGRES_DSN": "postgresql://stale",
+            "LOOP_TRUSTED_REVIEWER_SOCKET": "/tmp/stale.sock",
+        }
+    )
+
+    assert "GH_TOKEN" not in values
+    assert "OPENAI_API_KEY" not in values
+    assert "LOOP_POSTGRES_DSN" not in values
+    assert "LOOP_TRUSTED_REVIEWER_SOCKET" not in values
 
 
 
