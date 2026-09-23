@@ -593,6 +593,8 @@ def test_local_config_falls_back_to_implementer_model(
         "http://127.0.0.1:8765/path",
         "http://user@127.0.0.1:8765",
         "http://127.0.0.1",
+        "http://127.0.0.1:0",
+        "http://127.0.0.1:70000",
     ),
 )
 def test_local_config_rejects_non_loopback_or_ambiguous_endpoint(
