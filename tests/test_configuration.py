@@ -273,6 +273,24 @@ def test_python_source_does_not_load_dotenv_directly() -> None:
     assert "python-dotenv" not in source
 
 
+def test_mission_issue_may_be_empty_for_v2_autonomous_config(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "loop-engineering.ini"
+    _write_config(config, str(tmp_path / "product"))
+    text = config.read_text(encoding="utf-8").replace(
+        "mission_issue = 100\n",
+        "mission_issue = \n",
+    )
+    config.write_text(text, encoding="utf-8")
+
+    settings = LoopEngineeringSettings.load(tmp_path, {}, config_path=config)
+    values = settings.runtime_environment({})
+
+    assert settings.engine.mission_issue is None
+    assert "LOOP_MISSION_ISSUE" not in values
+
+
 def test_relative_workspace_path_is_rejected(tmp_path: Path) -> None:
     config = tmp_path / "loop-engineering.ini"
     _write_config(config, "relative/product")
