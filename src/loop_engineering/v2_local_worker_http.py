@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import Any
-from urllib import error as urllib_error, request as urllib_request
+from urllib import error, request
 
 
 MAX_WORKER_HTTP_RESPONSE_BYTES = 2_000_000
@@ -26,19 +26,19 @@ class LocalWorkerHttpTimeout(Exception):
 def post_worker_request(
     endpoint: str,
     production_name: str,
-    request: dict[str, object],
+    req: dict[str, object],
     timeout_seconds: int,
 ) -> dict[str, Any]:
     body = json.dumps(
         {
             "api_version": 1,
             "production_name": production_name,
-            "request": request,
+            "request": req,
         },
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode("utf-8")
-    http_request = urllib_request.Request(
+    http_req = request.Request(
         endpoint.rstrip("/") + "/v1/worker",
         data=body,
         headers={
@@ -49,11 +49,11 @@ def post_worker_request(
     )
 
     try:
-        response = urllib_request.urlopen(
-            http_request,
+        res = request.urlopen(
+            http_req,
             timeout=timeout_seconds,
         )
-    except urllib_error.HTTPError as exc:
+    except error.HTTPError as exc:
         try:
             exc.read(MAX_WORKER_HTTP_RESPONSE_BYTES + 1)
         except OSError:
@@ -62,7 +62,7 @@ def post_worker_request(
             "LOCAL_WORKER_HTTP_ERROR",
             exc.code,
         ) from exc
-    except urllib_error.URLError as exc:
+    except error.URLError as exc:
         if isinstance(exc.reason, TimeoutError):
             raise LocalWorkerHttpTimeout from exc
         raise LocalWorkerHttpFailure(
@@ -76,36 +76,36 @@ def post_worker_request(
         ) from exc
 
     try:
-        with response:
-            if response.status != 200:
+        with res:
+            if res.status != 200:
                 raise LocalWorkerHttpFailure(
                     "LOCAL_WORKER_HTTP_STATUS_INVALID",
-                    response.status,
+                    res.status,
                 )
-            content_type = response.headers.get("Content-Type", "")
+            content_type = res.headers.get("Content-Type", "")
             if (
                 content_type.split(";", 1)[0].strip().lower()
                 != "application/json"
             ):
                 raise LocalWorkerHttpFailure(
                     "LOCAL_WORKER_HTTP_CONTENT_TYPE_INVALID",
-                    response.status,
+                    res.status,
                 )
-            raw_length = response.headers.get("Content-Length")
+            raw_length = res.headers.get("Content-Length")
             if raw_length:
                 try:
                     length = int(raw_length)
                 except ValueError as exc:
                     raise LocalWorkerHttpFailure(
                         "LOCAL_WORKER_HTTP_LENGTH_INVALID",
-                        response.status,
+                        res.status,
                     ) from exc
                 if length > MAX_WORKER_HTTP_RESPONSE_BYTES:
                     raise LocalWorkerHttpFailure(
                         "LOCAL_WORKER_HTTP_RESPONSE_TOO_LARGE",
-                        response.status,
+                        res.status,
                     )
-            raw = response.read(MAX_WORKER_HTTP_RESPONSE_BYTES + 1)
+            raw = res.read(MAX_WORKER_HTTP_RESPONSE_BYTES + 1)
     except LocalWorkerHttpFailure:
         raise
     except OSError as exc:
