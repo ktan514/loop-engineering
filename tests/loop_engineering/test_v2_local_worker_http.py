@@ -57,23 +57,23 @@ def worker_endpoint() -> Iterator[str]:
 def test_post_worker_request_uses_versioned_http_envelope(
     worker_endpoint: str,
 ) -> None:
-    request = {
+    req = {
         "schema_version": 1,
         "request_identity": "req-1",
     }
 
-    response = post_worker_request(
+    res = post_worker_request(
         worker_endpoint,
         "product",
-        request,
+        req,
         2,
     )
 
-    assert response == {"schema_version": 1}
+    assert res == {"schema_version": 1}
     assert Handler.received == {
         "api_version": 1,
         "production_name": "product",
-        "request": request,
+        "request": req,
     }
 
 
