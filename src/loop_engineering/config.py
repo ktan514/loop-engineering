@@ -737,7 +737,13 @@ def _validate_local_llm_coder_endpoint(endpoint: str) -> None:
         raise ValueError("local_llm_coder.endpointへuserinfoは指定できません")
     if parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
         raise ValueError("local_llm_coder.endpointはhost:portだけを指定してください")
-    if parsed.hostname is None or parsed.port is None:
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise ValueError(
+            "local_llm_coder.endpointのportが不正です"
+        ) from error
+    if parsed.hostname is None or port is None or port < 1:
         raise ValueError("local_llm_coder.endpointにはhostとportが必要です")
     if parsed.hostname.lower() == "localhost":
         return
