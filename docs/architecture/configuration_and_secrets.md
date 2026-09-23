@@ -96,6 +96,19 @@ reviewer_api_key_env = OPENAI_API_KEY
 
 `reviewer_api_key_env`には秘密値ではなく環境変数名だけを書く。OpenAI API keyの標準環境変数名は`OPENAI_API_KEY`とし、`OPENAI_API_KEY_REVIEWER`は使用しない。
 
+環境変数名を指定するconfig fieldは、その名前をcredential取得先のAuthorityとする。Python側は`.env`を読まず、configから得た名前をkeyとして現在processのenvironmentを参照する。
+
+```text
+config:
+reviewer_api_key_env = MY_REVIEWER_KEY
+        ↓
+environment["MY_REVIEWER_KEY"]
+        ↓
+credential実値
+```
+
+configが`MY_REVIEWER_KEY`を指定している場合、親processに`OPENAI_API_KEY`が存在していても代替値として使用しない。指定された環境変数が未設定ならcredential未設定として扱い、別名へ暗黙fallbackしない。標準名を使う場合はconfig自身が`OPENAI_API_KEY`を指定する。
+
 ## 6. 秘密情報と`.env`
 
 次のような値は設定ファイル・Repository・Issue・PR・Checkpoint・通常logへ直接保存しない。
@@ -160,6 +173,7 @@ CLI overrideは設定ファイルの選択等の明示的な一時変更に限�
 - 通常起動前に`source .env`を要求しない
 - 秘密情報の実値を設定ファイルへ保存しない
 - 設定ファイルには秘密情報の環境変数名を記録できる
+- configで指定した環境変数名をcredential取得先のAuthorityとし、未設定時に別名へ暗黙fallbackしない
 - OpenAI API keyの標準環境変数名は`OPENAI_API_KEY`とする
 - `.env`をcommitしない
 - 未確定の秘密情報を空値で「設定済み」にしない
