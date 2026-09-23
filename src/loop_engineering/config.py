@@ -446,6 +446,7 @@ class LoopEngineeringSettings:
             values.pop("LOOP_IMPLEMENTER_PROFILE", None)
         else:
             values["LOOP_IMPLEMENTER_PROFILE"] = self.models.implementer_profile
+        values.pop("LOOP_LOCAL_LLM_CODER_ROOT", None)
         if self.local_llm_coder is None:
             for name in (
                 "LOOP_LOCAL_LLM_CODER_ENDPOINT",
@@ -721,6 +722,10 @@ def _local_llm_coder_from_parser(
     if not parser.has_section("local_llm_coder"):
         raise ValueError("設定section [local_llm_coder] がありません")
     section = parser["local_llm_coder"]
+    if "root" in section:
+        raise ValueError(
+            "local_llm_coder.rootは廃止されました。endpointを指定してください"
+        )
     profile = models.implementer_profile or models.implementer_model
     return LocalLlmCoderConfig(
         endpoint=_required(section, "endpoint").rstrip("/"),
