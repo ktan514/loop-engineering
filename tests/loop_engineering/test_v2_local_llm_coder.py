@@ -537,7 +537,9 @@ def test_settings_load_local_backend_and_profile(tmp_path: Path) -> None:
         "product",
         "local-main",
     )
-    runtime = loaded.runtime_environment({})
+    runtime = loaded.runtime_environment(
+        {"LOOP_LOCAL_LLM_CODER_ROOT": "/stale/backend/path"}
+    )
     assert runtime["LOOP_IMPLEMENTER_PROFILE"] == "local-main"
     assert runtime["LOOP_LOCAL_LLM_CODER_ENDPOINT"] == (
         "http://127.0.0.1:8765"
@@ -602,3 +604,35 @@ def test_local_config_rejects_non_loopback_or_ambiguous_endpoint(
 ) -> None:
     with pytest.raises(ValueError, match="local_llm_coder.endpoint"):
         LocalLlmCoderConfig(endpoint, "product", "local-main")
+
+
+
+def test_legacy_local_root_config_is_rejected(tmp_path: Path) -> None:
+    workspace = tmp_path / "product"
+    config_path = tmp_path / "loop-engineering.ini"
+    config_path.write_text(
+        "[project]\n"
+        "key = sample\n"
+        f"workspace_path = {workspace}\n"
+        "repository = owner/sample\n"
+        "project_number = 1\n"
+        "mission_issue = 1\n"
+        "\n[models]\n"
+        "implementer_provider = local-llm-coder\n"
+        "implementer_model = local-main\n"
+        "reviewer_model = reviewer\n"
+        "\n[local_llm_coder]\n"
+        "root = /old/local-llm-coder\n"
+        "production_name = product\n"
+        "\n[credentials]\n"
+        "\n[operational_store]\n"
+        "\n[runtime]\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="rootは廃止"):
+        LoopEngineeringSettings.load(
+            tmp_path,
+            {},
+            config_path=config_path,
+        )
