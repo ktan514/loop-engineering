@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
@@ -9,6 +10,7 @@ from collections.abc import Mapping
 from configparser import ConfigParser, SectionProxy
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,25 +234,26 @@ class VerificationCommandConfig:
 class LocalLlmCoderConfig:
     """local-llm-coder Worker Backendの非秘密設定。"""
 
-    root: Path
+    endpoint: str
     production_name: str
     model_profile: str
 
     def __post_init__(self) -> None:
-        if not self.root.is_absolute():
-            raise ValueError("local_llm_coder.rootは絶対pathで指定してください")
+        _validate_local_llm_coder_endpoint(self.endpoint)
         if (
             not self.production_name
-            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", self.production_name) is None
-            or self.production_name in {".", ".."}
+            or re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._-]*",
+                self.production_name,
+            )
+            is None
+            or self.production_name in {".", "..", "tmp"}
         ):
             raise ValueError("local_llm_coder.production_nameが不正です")
         if not self.model_profile.strip():
-            raise ValueError("local_llm_coder.model_profileを空文字にはできません")
-
-    @property
-    def active_production_path(self) -> Path:
-        return (self.root / "productions" / self.production_name).resolve(strict=False)
+            raise ValueError(
+                "local_llm_coder.model_profileを空文字にはできません"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -445,13 +448,15 @@ class LoopEngineeringSettings:
             values["LOOP_IMPLEMENTER_PROFILE"] = self.models.implementer_profile
         if self.local_llm_coder is None:
             for name in (
-                "LOOP_LOCAL_LLM_CODER_ROOT",
+                "LOOP_LOCAL_LLM_CODER_ENDPOINT",
                 "LOOP_LOCAL_LLM_CODER_PRODUCTION",
                 "LOOP_LOCAL_LLM_CODER_MODEL_PROFILE",
             ):
                 values.pop(name, None)
         else:
-            values["LOOP_LOCAL_LLM_CODER_ROOT"] = str(self.local_llm_coder.root)
+            values["LOOP_LOCAL_LLM_CODER_ENDPOINT"] = (
+                self.local_llm_coder.endpoint
+            )
             values["LOOP_LOCAL_LLM_CODER_PRODUCTION"] = (
                 self.local_llm_coder.production_name
             )
@@ -716,15 +721,34 @@ def _local_llm_coder_from_parser(
     if not parser.has_section("local_llm_coder"):
         raise ValueError("設定section [local_llm_coder] がありません")
     section = parser["local_llm_coder"]
-    root = Path(_required(section, "root")).expanduser()
-    if not root.is_absolute():
-        raise ValueError("local_llm_coder.rootは絶対pathで指定してください")
     profile = models.implementer_profile or models.implementer_model
     return LocalLlmCoderConfig(
-        root=root.resolve(strict=False),
+        endpoint=_required(section, "endpoint").rstrip("/"),
         production_name=_required(section, "production_name"),
         model_profile=profile,
     )
+
+
+def _validate_local_llm_coder_endpoint(endpoint: str) -> None:
+    parsed = urlsplit(endpoint)
+    if parsed.scheme != "http":
+        raise ValueError("local_llm_coder.endpointはhttpが必要です")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("local_llm_coder.endpointへuserinfoは指定できません")
+    if parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
+        raise ValueError("local_llm_coder.endpointはhost:portだけを指定してください")
+    if parsed.hostname is None or parsed.port is None:
+        raise ValueError("local_llm_coder.endpointにはhostとportが必要です")
+    if parsed.hostname.lower() == "localhost":
+        return
+    try:
+        address = ipaddress.ip_address(parsed.hostname)
+    except ValueError as error:
+        raise ValueError(
+            "local_llm_coder.endpointはloopback hostが必要です"
+        ) from error
+    if not address.is_loopback:
+        raise ValueError("local_llm_coder.endpointはloopback hostが必要です")
 
 
 def _section(parser: ConfigParser, name: str) -> SectionProxy:
