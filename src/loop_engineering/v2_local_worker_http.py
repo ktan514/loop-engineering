@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import socket
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -65,12 +64,12 @@ def post_worker_request(
             exc.code,
         ) from exc
     except urllib.error.URLError as exc:
-        if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+        if isinstance(exc.reason, TimeoutError):
             raise LocalWorkerHttpTimeout from exc
         raise LocalWorkerHttpFailure(
             "LOCAL_WORKER_CONNECTION_FAILED",
         ) from exc
-    except (TimeoutError, socket.timeout) as exc:
+    except TimeoutError as exc:
         raise LocalWorkerHttpTimeout from exc
     except OSError as exc:
         raise LocalWorkerHttpFailure(
