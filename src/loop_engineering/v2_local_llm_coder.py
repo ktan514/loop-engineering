@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -138,7 +138,10 @@ class LocalLlmCoderImplementerAdapter:
         environment: Mapping[str, str],
         *,
         timeout_seconds: int = 1800,
-        worker_client: Any = post_worker_request,
+        worker_client: Callable[
+            [str, str, dict[str, object], int],
+            dict[str, Any],
+        ] = post_worker_request,
     ) -> None:
         if timeout_seconds < 1 or timeout_seconds > 7200:
             raise ValueError("LOCAL_LLM_CODER_TIMEOUT_INVALID")
