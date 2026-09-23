@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import subprocess
-import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .config import LocalLlmCoderConfig, LoopEngineeringSettings
+from .v2_local_worker_http import (
+    LocalWorkerHttpFailure,
+    LocalWorkerHttpTimeout,
+    post_worker_request,
+)
 from .v2_implementer import (
     CodexProposalImplementer,
     DevelopmentTaskPacket,
@@ -125,7 +128,7 @@ class _ParsedWorkerResult:
 
 
 class LocalLlmCoderImplementerAdapter:
-    """1回のDESIGN / IMPLEMENT / REPAIRをfile-based Worker CLIへ委譲する。"""
+    """1回のDESIGN / IMPLEMENT / REPAIRをlocalhost Worker APIへ委譲する。"""
 
     def __init__(
         self,
@@ -143,8 +146,6 @@ class LocalLlmCoderImplementerAdapter:
         self._workspace = workspace_path.resolve(strict=False)
         self._environment = _sanitized_environment(environment)
         self._timeout_seconds = timeout_seconds
-        self._root = config.root.resolve(strict=False)
-        self._script = self._root / "scripts" / "run-worker.sh"
 
     def execute(self, packet: DevelopmentTaskPacket) -> ImplementerResult:
         validation = validate_development_task_packet(packet)
@@ -156,20 +157,8 @@ class LocalLlmCoderImplementerAdapter:
             return _blocked(local_validation)
 
         workspace = packet.workspace_canonical_path.resolve(strict=False)
-        if (
-            workspace != self._workspace
-            or workspace != self._config.active_production_path
-        ):
+        if workspace != self._workspace:
             return _blocked("LOCAL_WORKSPACE_IDENTITY_MISMATCH")
-        if (
-            not self._root.is_dir()
-            or not self._script.is_file()
-            or not os.access(self._script, os.X_OK)
-        ):
-            return _failed(
-                "LOCAL_LLM_CODER_UNAVAILABLE",
-                failure_kind="PROVIDER_UNAVAILABLE",
-            )
 
         pre_head = self._git_head(workspace)
         if pre_head is None:
@@ -180,63 +169,46 @@ class LocalLlmCoderImplementerAdapter:
         request = _request_payload(packet, self._config.model_profile)
         request_identity = _required_string(request["request_identity"])
         try:
-            with tempfile.TemporaryDirectory(prefix="loop-local-worker-") as temporary:
-                temporary_root = Path(temporary)
-                request_path = temporary_root / "request.json"
-                result_path = temporary_root / "result.json"
-                request_path.write_text(
-                    json.dumps(request, ensure_ascii=False, indent=2) + "\n",
-                    encoding="utf-8",
+            response = post_worker_request(
+                self._config.endpoint,
+                self._config.production_name,
+                request,
+                self._timeout_seconds,
+            )
+        except LocalWorkerHttpTimeout:
+            return ImplementerResult(
+                ImplementerStatus.INCOMPLETE,
+                "LOCAL_WORKER_TIMEOUT",
+                failure_kind="PROCESS_TIMEOUT",
+            )
+        except LocalWorkerHttpFailure as exc:
+            if exc.http_status == 409:
+                return ImplementerResult(
+                    ImplementerStatus.INCOMPLETE,
+                    "LOCAL_WORKER_BUSY",
+                    failure_kind="PROVIDER_UNAVAILABLE",
                 )
-                try:
-                    process = self._runner.run(
-                        (
-                            str(self._script),
-                            self._config.production_name,
-                            "--request",
-                            str(request_path),
-                            "--result",
-                            str(result_path),
-                        ),
-                        cwd=self._root,
-                        environment=self._environment,
-                        timeout_seconds=self._timeout_seconds,
-                    )
-                except subprocess.TimeoutExpired:
-                    return ImplementerResult(
-                        ImplementerStatus.INCOMPLETE,
-                        "LOCAL_WORKER_TIMEOUT",
-                        failure_kind="PROCESS_TIMEOUT",
-                    )
-                except (OSError, subprocess.SubprocessError):
-                    return _failed(
-                        "LOCAL_WORKER_UNAVAILABLE",
-                        failure_kind="PROVIDER_UNAVAILABLE",
-                    )
-
-                if not result_path.is_file():
-                    detail = (
-                        "LOCAL_WORKER_PROCESS_FAILED"
-                        if process.returncode != 0
-                        else "LOCAL_WORKER_RESULT_MISSING"
-                    )
-                    return _failed(detail, failure_kind="PROCESS_EXIT")
-
-                try:
-                    parsed = _read_worker_result(
-                        result_path,
-                        packet=packet,
-                        request_identity=request_identity,
-                    )
-                except (OSError, UnicodeError, ValueError):
-                    return _failed(
-                        "LOCAL_WORKER_RESULT_MALFORMED",
-                        failure_kind="MALFORMED_AGENT_RESULT",
-                    )
-        except OSError:
+            failure_kind = (
+                "RUNTIME_PREFLIGHT"
+                if exc.http_status is not None
+                and 400 <= exc.http_status < 500
+                else "PROVIDER_UNAVAILABLE"
+            )
             return _failed(
-                "LOCAL_WORKER_TEMPORARY_IO_FAILED",
-                failure_kind="RUNTIME_PREFLIGHT",
+                exc.code,
+                failure_kind=failure_kind,
+            )
+
+        try:
+            parsed = _parse_worker_result(
+                response,
+                packet=packet,
+                request_identity=request_identity,
+            )
+        except ValueError:
+            return _failed(
+                "LOCAL_WORKER_RESULT_MALFORMED",
+                failure_kind="MALFORMED_AGENT_RESULT",
             )
 
         if parsed.result_target_identity is not None:
@@ -246,12 +218,6 @@ class LocalLlmCoderImplementerAdapter:
                     "LOCAL_WORKER_TARGET_READBACK_MISMATCH",
                     failure_kind="TARGET_READBACK",
                 )
-
-        if process.returncode != 0 and parsed.status == "PASS":
-            return _failed(
-                "LOCAL_WORKER_PROCESS_RESULT_CONFLICT",
-                failure_kind="PROCESS_EXIT",
-            )
 
         if parsed.status == "PASS":
             assert parsed.result_target_identity is not None
@@ -458,15 +424,12 @@ def _finding_payload(finding: ImplementerFinding) -> dict[str, str]:
     }
 
 
-def _read_worker_result(
-    path: Path,
+def _parse_worker_result(
+    raw: object,
     *,
     packet: DevelopmentTaskPacket,
     request_identity: str,
 ) -> _ParsedWorkerResult:
-    if path.stat().st_size > _MAX_RESULT_BYTES:
-        raise ValueError("result too large")
-    raw: object = json.loads(path.read_text(encoding="utf-8"))
     value = _object_mapping(raw)
     if value is None or set(value) != _RESULT_FIELDS:
         raise ValueError("result fields invalid")
