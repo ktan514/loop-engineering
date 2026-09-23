@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from loop_engineering.config import LocalLlmCoderConfig
 from loop_engineering.v2_implementer import (
     DevelopmentTaskPacket,
     ImplementerFinding,
@@ -13,6 +14,7 @@ from loop_engineering.v2_implementer import (
     WorkspaceEffectReport,
 )
 from loop_engineering.v2_local_quality import (
+    LocalLlmCoderReviewerAdapter,
     LocalQualityContext,
     LocalQualityCoordinator,
     LocalQualityStage,
@@ -29,6 +31,10 @@ from loop_engineering.v2_local_quality import (
     VerificationCommandDescriptor,
     VerificationCommandOutcome,
     validate_local_findings,
+)
+from loop_engineering.v2_local_worker_http import (
+    LocalWorkerHttpFailure,
+    LocalWorkerHttpTimeout,
 )
 
 
@@ -575,3 +581,205 @@ def _nullable_value(
 ) -> str | None:
     del sql, field, values
     return None
+
+
+class FakeReviewWorkerClient:
+    def __init__(self, mode: str = "pass") -> None:
+        self.mode = mode
+        self.calls = 0
+        self.request: dict[str, object] | None = None
+        self.endpoint: str | None = None
+        self.production_name: str | None = None
+
+    def __call__(
+        self,
+        endpoint: str,
+        production_name: str,
+        request: dict[str, object],
+        timeout_seconds: int,
+    ) -> dict[str, object]:
+        del timeout_seconds
+        self.calls += 1
+        self.endpoint = endpoint
+        self.production_name = production_name
+        self.request = request
+        if self.mode == "timeout":
+            raise LocalWorkerHttpTimeout
+        if self.mode == "unavailable":
+            raise LocalWorkerHttpFailure("LOCAL_WORKER_CONNECTION_FAILED")
+        if self.mode == "busy":
+            raise LocalWorkerHttpFailure("LOCAL_WORKER_HTTP_ERROR", 409)
+
+        target_head = request["input_target_identity"]
+        expected_change = request["expected_change_identity"]
+        findings: list[dict[str, str]] = []
+        status = "PASS"
+        if self.mode == "findings":
+            status = "FINDINGS"
+            findings = [
+                {
+                    "finding_identity": "finding:http-review",
+                    "severity": "BLOCKING",
+                    "path": "src/app.py",
+                    "location": "L1",
+                    "problem": "不備",
+                    "basis": "設計",
+                    "evidence": "現行code",
+                    "impact": "受入条件未達",
+                    "suggested_fix": "修正する",
+                }
+            ]
+        return {
+            "schema_version": 1,
+            "request_identity": request["request_identity"],
+            "task_packet_identity": request["task_packet_identity"],
+            "role": "SELF_REVIEWER",
+            "input_target_identity": target_head,
+            "result_target_identity": target_head,
+            "change_identity": expected_change,
+            "status": status,
+            "failure_kind": None,
+            "completion": {
+                "scope_checked": True,
+                "target_identity_checked": True,
+                "work_finalized": True,
+                "verification_finalized": True,
+                "review_scope_checked": True,
+                "canonical_checked": True,
+                "blocking_findings_finalized": True,
+                "non_blocking_findings_finalized": True,
+                "unverified_finalized": True,
+                "final_verdict_present": True,
+            },
+            "findings": findings,
+            "changed_paths": [],
+            "verification_evidence": [],
+            "diagnostics": [],
+            "session_id": "session-http-review",
+            "artifacts": {
+                "runtime_directory": "/tmp/runtime",
+                "event_log": "/tmp/runtime/events.ndjson",
+                "stderr_log": "/tmp/runtime/stderr.log",
+                "agent_artifact_refs": [],
+            },
+        }
+
+
+def test_local_reviewer_uses_http_worker_api(tmp_path: Path) -> None:
+    workspace = tmp_path / "product"
+    workspace.mkdir()
+    item = target(
+        head="a" * 40,
+        change="sha256:" + "b" * 64,
+    )
+    review_context = context(item, workspace=workspace.resolve())
+    worker = FakeReviewWorkerClient()
+    adapter = LocalLlmCoderReviewerAdapter(
+        FingerprintRunner(workspace.resolve()),
+        LocalLlmCoderConfig(
+            "http://127.0.0.1:8765",
+            "product",
+            "local-main",
+        ),
+        workspace.resolve(),
+        {},
+        "local-main",
+        worker_client=worker,
+    )
+
+    result = adapter.review(review_context)
+
+    assert result.status is LocalReviewStatus.PASS
+    assert worker.endpoint == "http://127.0.0.1:8765"
+    assert worker.production_name == "product"
+    assert worker.request is not None
+    assert worker.request["role"] == "SELF_REVIEWER"
+    assert worker.request["effect_requirement"] == "MUST_NOT_CHANGE"
+    assert worker.request["workspace_canonical_path"] == str(
+        workspace.resolve()
+    )
+
+
+def test_local_reviewer_http_findings_are_preserved(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "product"
+    workspace.mkdir()
+    review_context = context(
+        target(
+            head="a" * 40,
+            change="sha256:" + "b" * 64,
+        ),
+        workspace=workspace.resolve(),
+    )
+    worker = FakeReviewWorkerClient("findings")
+    adapter = LocalLlmCoderReviewerAdapter(
+        FingerprintRunner(workspace.resolve()),
+        LocalLlmCoderConfig(
+            "http://localhost:8765",
+            "product",
+            "local-main",
+        ),
+        workspace.resolve(),
+        {},
+        "local-main",
+        worker_client=worker,
+    )
+
+    result = adapter.review(review_context)
+
+    assert result.status is LocalReviewStatus.FINDINGS
+    assert len(result.findings) == 1
+    assert result.findings[0].finding_identity == "finding:http-review"
+
+
+def test_local_reviewer_http_timeout_is_incomplete(tmp_path: Path) -> None:
+    workspace = tmp_path / "product"
+    workspace.mkdir()
+    review_context = context(workspace=workspace.resolve())
+    worker = FakeReviewWorkerClient("timeout")
+    adapter = LocalLlmCoderReviewerAdapter(
+        FingerprintRunner(workspace.resolve()),
+        LocalLlmCoderConfig(
+            "http://127.0.0.1:8765",
+            "product",
+            "local-main",
+        ),
+        workspace.resolve(),
+        {},
+        "local-main",
+        worker_client=worker,
+    )
+
+    result = adapter.review(review_context)
+
+    assert result.status is LocalReviewStatus.INCOMPLETE
+    assert result.failure_kind == "PROCESS_TIMEOUT"
+
+
+def test_local_reviewer_workspace_mismatch_blocks_before_http(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "product"
+    workspace.mkdir()
+    other = tmp_path / "other"
+    other.mkdir()
+    review_context = context(workspace=other.resolve())
+    worker = FakeReviewWorkerClient()
+    adapter = LocalLlmCoderReviewerAdapter(
+        FingerprintRunner(workspace.resolve()),
+        LocalLlmCoderConfig(
+            "http://127.0.0.1:8765",
+            "product",
+            "local-main",
+        ),
+        workspace.resolve(),
+        {},
+        "local-main",
+        worker_client=worker,
+    )
+
+    result = adapter.review(review_context)
+
+    assert result.status is LocalReviewStatus.BLOCKED
+    assert worker.calls == 0
