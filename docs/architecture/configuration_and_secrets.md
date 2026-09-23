@@ -185,7 +185,7 @@ local_reviewer_provider = local-llm-coder
 local_reviewer_profile = local-main
 
 [local_llm_coder]
-root = /absolute/path/to/local-llm-coder
+endpoint = http://127.0.0.1:8765
 production_name = product-workspace
 
 [review.level.1]
@@ -199,7 +199,7 @@ model = <level-2-model>
 required = true
 ```
 
-既存の`implementer_model` / `reviewer_model`単一設定は移行期間の互換入力とし、新しいprofile / level設定へ正規化する。`implementer_provider = local-llm-coder`の場合、`[local_llm_coder]`の`root` / `production_name`と`implementer_profile`をBackend設定へ正規化し、`workspace_path == resolve(root / productions / production_name)`をWorker起動前に必須確認する。Core state machineへmodel名を埋め込まない。
+既存の`implementer_model` / `reviewer_model`単一設定は移行期間の互換入力とし、新しいprofile / level設定へ正規化する。`implementer_provider = local-llm-coder`の場合、`[local_llm_coder]`の`endpoint` / `production_name`と`implementer_profile`をBackend設定へ正規化する。Loop EngineeringはBackend repository rootを保持せず、Product `workspace_path`とWorker requestのcanonical pathをlocal-llm-coder側preflightで照合する。Core state machineへmodel名を埋め込まない。
 
 ### 10.2 local-llm-coder側
 
