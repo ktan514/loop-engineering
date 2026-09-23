@@ -45,9 +45,9 @@ def worker_endpoint() -> Iterator[str]:
     server.daemon_threads = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    host, port = server.server_address[:2]
+    port = server.server_port
     try:
-        yield f"http://{host}:{port}"
+        yield f"http://127.0.0.1:{port}"
     finally:
         server.shutdown()
         server.server_close()
